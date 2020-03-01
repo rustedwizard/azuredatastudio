@@ -10,10 +10,11 @@ import * as fs from 'fs-extra';
 import { IPrompter, QuestionTypes, IQuestion } from '../prompts/question';
 import CodeAdapter from '../prompts/adapter';
 import { BookTreeItem } from './bookTreeItem';
-import { isEditorTitleFree } from '../common/utils';
 import { BookModel } from './bookModel';
 import { Deferred } from '../common/promise';
 import * as loc from '../common/localizedConstants';
+
+const Content = 'content';
 
 export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeItem> {
 
@@ -25,8 +26,6 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 	private prompter: IPrompter;
 	private _initializeDeferred: Deferred<void> = new Deferred<void>();
 
-	// For testing
-	private _errorMessage: string;
 	private _openAsUntitled: boolean;
 	public viewId: string;
 	public books: BookModel[];
@@ -97,8 +96,9 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 			const bookRoot = this.currentBook.bookItems[0];
 			const sectionToOpen = bookRoot.findChildSection(urlToOpen);
 			const urlPath = sectionToOpen ? sectionToOpen.url : bookRoot.tableOfContents.sections[0].url;
-			const sectionToOpenMarkdown: string = path.join(this.currentBook.bookPath, 'content', urlPath.concat('.md'));
-			const sectionToOpenNotebook: string = path.join(this.currentBook.bookPath, 'content', urlPath.concat('.ipynb'));
+			const sectionToOpenMarkdown: string = path.join(this.currentBook.bookPath, Content, urlPath.concat('.md'));
+			// The Notebook editor expects a posix path for the resource (it will still resolve to the correct fsPath based on OS)
+			const sectionToOpenNotebook: string = path.posix.join(this.currentBook.bookPath, Content, urlPath.concat('.ipynb'));
 			if (await fs.pathExists(sectionToOpenMarkdown)) {
 				this.openMarkdown(sectionToOpenMarkdown);
 			}
@@ -191,9 +191,13 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 		}
 	}
 
-	public async searchJupyterBooks(): Promise<void> {
+	public async searchJupyterBooks(treeItem?: BookTreeItem): Promise<void> {
 		if (this.currentBook && this.currentBook.bookPath) {
-			let filesToIncludeFiltered = path.join(this.currentBook.bookPath, '**', '*.md') + ',' + path.join(this.currentBook.bookPath, '**', '*.ipynb');
+			let folderToSearch = this.currentBook.bookPath;
+			if (treeItem && treeItem.uri) {
+				folderToSearch = path.join(folderToSearch, Content, path.dirname(treeItem.uri));
+			}
+			let filesToIncludeFiltered = path.join(folderToSearch, '**', '*.md') + ',' + path.join(folderToSearch, '**', '*.ipynb');
 			vscode.commands.executeCommand('workbench.action.findInFiles', { filesToInclude: filesToIncludeFiltered, query: '' });
 		}
 	}
@@ -274,7 +278,7 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 		if (element) {
 			let parentPath;
 			if (element.root.endsWith('.md')) {
-				parentPath = path.join(this.currentBook.bookPath, 'content', 'readme.md');
+				parentPath = path.join(this.currentBook.bookPath, Content, 'readme.md');
 				if (parentPath === element.root) {
 					return undefined;
 				}
@@ -292,14 +296,8 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 		}
 	}
 
-	public get errorMessage() {
-		return this._errorMessage;
-	}
-
 	getUntitledNotebookUri(resource: string): vscode.Uri {
-		let untitledFileName: vscode.Uri;
-		let nextTitle: string = this.findNextUntitledFileName(resource);
-		untitledFileName = vscode.Uri.parse(`untitled:${nextTitle}`);
+		let untitledFileName = vscode.Uri.parse(`untitled:${resource}`);
 		if (!this.currentBook.getAllBooks().get(untitledFileName.fsPath) && !this.currentBook.getAllBooks().get(path.basename(untitledFileName.fsPath))) {
 			let notebook = this.currentBook.getAllBooks().get(resource);
 			this.currentBook.getAllBooks().set(path.basename(untitledFileName.fsPath), notebook);
@@ -307,18 +305,6 @@ export class BookTreeViewProvider implements vscode.TreeDataProvider<BookTreeIte
 		return untitledFileName;
 	}
 
-	findNextUntitledFileName(filePath: string): string {
-		const baseName = path.basename(filePath);
-		let idx = 0;
-		let title;
-		do {
-			const suffix = idx === 0 ? '' : `-${idx}`;
-			title = `${baseName}${suffix}`;
-			idx++;
-		} while (!isEditorTitleFree(title));
-
-		return title;
-	}
 
 	//Confirmation message dialog
 	private async confirmReplace(): Promise<boolean> {

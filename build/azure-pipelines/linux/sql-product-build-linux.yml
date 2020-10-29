@@ -87,12 +87,6 @@ steps:
 
   - script: |
       set -e
-      yarn gulp install-sqltoolsservice
-      yarn gulp install-ssmsmin
-    displayName: Install extension binaries
-
-  - script: |
-      set -e
       yarn gulp vscode-linux-x64-min-ci
       yarn gulp vscode-reh-linux-x64-min-ci
       yarn gulp vscode-reh-web-linux-x64-min-ci
@@ -102,16 +96,35 @@ steps:
 
   - script: |
       set -e
-      service xvfb start
-    displayName: Start xvfb
-    condition: and(succeeded(), eq(variables['VSCODE_STEP_ON_IT'], 'false'))
-
-  - script: |
-      set -e
       yarn gulp package-rebuild-extensions
       yarn gulp compile-extensions
       yarn gulp package-external-extensions
     displayName: Package External extensions
+
+  - script: |
+      set -e
+      service xvfb start
+    displayName: Start xvfb
+    condition: and(succeeded(), eq(variables['RUN_TESTS'], 'true'))
+
+  - script: |
+      set -e
+      DISPLAY=:10 ./scripts/test.sh --build --coverage --reporter mocha-junit-reporter --tfs "Unit Tests"
+    displayName: Run unit tests (Electron)
+    condition: and(succeeded(), eq(variables['RUN_TESTS'], 'true'))
+
+  - script: |
+      # Figure out the full absolute path of the product we just built
+      # including the remote server and configure the integration tests
+      # to run with these builds instead of running out of sources.
+      set -e
+      APP_ROOT=$(agent.builddirectory)/azuredatastudio-linux-x64
+      APP_NAME=$(node -p "require(\"$APP_ROOT/resources/app/product.json\").applicationName")
+      INTEGRATION_TEST_ELECTRON_PATH="$APP_ROOT/$APP_NAME" \
+      VSCODE_REMOTE_SERVER_PATH="$(agent.builddirectory)/azuredatastudio-reh-linux-x64" \
+      DISPLAY=:10 ./scripts/test-integration.sh --build --tfs "Integration Tests"
+    displayName: Run integration tests (Electron)
+    condition: and(succeeded(), eq(variables['RUN_TESTS'], 'true'))
 
   - script: |
       set -e
@@ -147,24 +160,23 @@ steps:
       ./build/azure-pipelines/linux/createDrop.sh
     displayName: Create Drop
 
-  - task: PublishBuildArtifacts@1
-    displayName: 'Publish Artifact: drop'
+  - task: CopyFiles@2
+    displayName: 'Copy Extension Unit Test Coverage Files to: $(Build.ArtifactStagingDirectory)'
+    inputs:
+      SourceFolder: '$(Build.SourcesDirectory)/extensions'
+      Contents: '*/coverage/**'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)/test-results/coverage'
 
   - task: PublishTestResults@2
     displayName: 'Publish Test Results test-results.xml'
     inputs:
-      testResultsFiles: 'test-results.xml'
-      searchFolder: '$(Build.SourcesDirectory)'
+      testResultsFiles: '*.xml'
+      searchFolder: '$(Build.ArtifactStagingDirectory)/test-results'
     continueOnError: true
     condition: and(succeeded(), eq(variables['RUN_TESTS'], 'true'))
 
-  - task: PublishCodeCoverageResults@1
-    displayName: 'Publish code coverage from $(Build.SourcesDirectory)/.build/coverage/cobertura-coverage.xml'
-    inputs:
-      codeCoverageTool: Cobertura
-      summaryFileLocation: '$(Build.SourcesDirectory)/.build/coverage/cobertura-coverage.xml'
-      reportDirectory: '$(Build.SourcesDirectory)/.build/coverage'
-    continueOnError: true
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
 
   - task: ms.vss-governance-buildtask.governance-build-task-component-detection.ComponentGovernanceComponentDetection@0
     displayName: 'Component Detection'

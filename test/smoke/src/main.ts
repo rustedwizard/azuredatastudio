@@ -21,23 +21,19 @@ import {
 	FileLogger,
 } from '../../automation';
 
-//{{SQL CARBON EDIT}}
-import { setup as runProfilerTests } from './sql/profiler/profiler.test';
-import { setup as runQueryEditorTests } from './sql/queryEditor/queryEditor.test';
-
-//Original
-/*
-import { setup as setupDataMigrationTests } from './areas/workbench/data-migration.test';
+import { main as sqlMain, setup as sqlSetup } from './sql/main'; //{{SQL CARBON EDIT}}
+/*import { setup as setupDataMigrationTests } from './areas/workbench/data-migration.test';
 import { setup as setupDataLossTests } from './areas/workbench/data-loss.test';
 import { setup as setupDataPreferencesTests } from './areas/preferences/preferences.test';
 import { setup as setupDataSearchTests } from './areas/search/search.test';
+import { setup as setupDataNotebookTests } from './areas/notebook/notebook.test';
+import { setup as setupDataLanguagesTests } from './areas/languages/languages.test';
 import { setup as setupDataEditorTests } from './areas/editor/editor.test';
 import { setup as setupDataStatusbarTests } from './areas/statusbar/statusbar.test';
 import { setup as setupDataExtensionTests } from './areas/extensions/extensions.test';
-import { setup as setupTerminalTests } from './areas/terminal/terminal.test';
 import { setup as setupDataMultirootTests } from './areas/multiroot/multiroot.test';
 import { setup as setupDataLocalizationTests } from './areas/workbench/localization.test';
-import { setup as setupLaunchTests } from './areas/workbench/launch.test';*///{{END}}
+import { setup as setupLaunchTests } from './areas/workbench/launch.test';*/
 
 if (!/^v10/.test(process.version) && !/^v12/.test(process.version)) {
 	console.error('Error: Smoketest must be run using Node 10/12. Currently running', process.version);
@@ -69,8 +65,8 @@ const opts = minimist(args, {
 	}
 });
 
-const testRepoUrl = 'https://github.com/Microsoft/vscode-smoketest-express';
-const workspacePath = path.join(testDataPath, 'vscode-smoketest-express');
+const testRepoUrl = 'https://github.com/anthonydresser/azuredatastudio-smoke-test-repo.git';
+const workspacePath = path.join(testDataPath, 'azuredatastudio-smoke-test-repo');
 const extensionsPath = path.join(testDataPath, 'extensions-dir');
 mkdirp.sync(extensionsPath);
 
@@ -160,6 +156,8 @@ if (!opts.web) {
 	} else {
 		quality = Quality.Stable;
 	}
+
+	console.log(`Running desktop smoke tests against ${electronPath}`);
 }
 
 //
@@ -168,14 +166,20 @@ if (!opts.web) {
 else {
 	const testCodeServerPath = opts.build || process.env.VSCODE_REMOTE_SERVER_PATH;
 
-	if (typeof testCodeServerPath === 'string' && !fs.existsSync(testCodeServerPath)) {
-		fail(`Can't find Code server at ${testCodeServerPath}.`);
+	if (typeof testCodeServerPath === 'string') {
+		if (!fs.existsSync(testCodeServerPath)) {
+			fail(`Can't find Code server at ${testCodeServerPath}.`);
+		} else {
+			console.log(`Running web smoke tests against ${testCodeServerPath}`);
+		}
 	}
 
 	if (!testCodeServerPath) {
 		process.env.VSCODE_REPOSITORY = repoPath;
 		process.env.VSCODE_DEV = '1';
 		process.env.VSCODE_CLI = '1';
+
+		console.log(`Running web smoke out of sources`);
 	}
 
 	if (process.env.VSCODE_DEV === '1') {
@@ -209,8 +213,8 @@ async function setupRepository(): Promise<void> {
 			cp.spawnSync('git', ['clean', '-xdf'], { cwd: workspacePath });
 		}
 
-		console.log('*** Running yarn...');
-		cp.execSync('yarn', { cwd: workspacePath, stdio: 'inherit' });
+		// console.log('*** Running yarn...');
+		// cp.execSync('yarn', { cwd: workspacePath, stdio: 'inherit' });
 	}
 }
 
@@ -257,6 +261,7 @@ before(async function () {
 	this.timeout(2 * 60 * 1000); // allow two minutes for setup
 	await setup();
 	this.defaultOptions = createOptions();
+	await sqlSetup(this.defaultOptions);
 });
 
 after(async function () {
@@ -272,30 +277,6 @@ after(async function () {
 });
 
 describe(`VSCode Smoke Tests (${opts.web ? 'Web' : 'Electron'})`, () => {
-	before(async function () {
-		const app = new Application(this.defaultOptions);
-		await app!.start(opts.web ? false : undefined);
-		this.app = app;
-		//{{SQL CARBON EDIT}}
-		const testExtLoadedText = 'Test Extension Loaded';
-		const testSetupCompletedText = 'Test Setup Completed';
-		const allExtensionsLoadedText = 'All Extensions Loaded';
-		const setupTestCommand = 'Test: Setup Integration Test';
-		const waitForExtensionsCommand = 'Test: Wait For Extensions To Load';
-		await app.workbench.statusbar.waitForStatusbarText(testExtLoadedText, testExtLoadedText);
-		await app.workbench.quickopen.runCommand(setupTestCommand);
-		await app.workbench.statusbar.waitForStatusbarText(testSetupCompletedText, testSetupCompletedText);
-		await app!.reload();
-		await app.workbench.statusbar.waitForStatusbarText(testExtLoadedText, testExtLoadedText);
-		await app.workbench.quickopen.runCommand(waitForExtensionsCommand);
-		await app.workbench.statusbar.waitForStatusbarText(allExtensionsLoadedText, allExtensionsLoadedText);
-		//{{END}}
-	});
-
-	after(async function () {
-		await this.app.stop();
-	});
-
 	if (screenshotsPath) {
 		afterEach(async function () {
 			if (this.currentTest.state !== 'failed') {
@@ -317,17 +298,35 @@ describe(`VSCode Smoke Tests (${opts.web ? 'Web' : 'Electron'})`, () => {
 		});
 	}
 
-	/*if (!opts.web) { setupDataMigrationTests(opts['stable-build'], testDataPath); }
-	if (!opts.web) { setupDataLossTests(); }
-	if (!opts.web) { setupDataPreferencesTests(); }
-	setupDataSearchTests();
-	setupDataEditorTests();
-	setupDataStatusbarTests(!!opts.web);
-	if (!opts.web) { setupDataExtensionTests(); }
-	setupTerminalTests();
-	if (!opts.web) { setupDataMultirootTests(); }
-	if (!opts.web) { setupDataLocalizationTests(); }
-	if (!opts.web) { setupLaunchTests(); }*/
-	runProfilerTests(); // {{SQL CARBON EDIT}} add our tests
-	runQueryEditorTests(); // {{SQL CARBON EDIT}} add our tests
+	/*if (!opts.web && opts['stable-build']) {
+		describe(`Stable vs Insiders Smoke Tests: This test MUST run before releasing by providing the --stable-build command line argument`, () => {
+			setupDataMigrationTests(opts['stable-build'], testDataPath);
+		});
+	}*/
+
+	describe(`VSCode Smoke Tests (${opts.web ? 'Web' : 'Electron'})`, () => {
+		before(async function () {
+			const app = new Application(this.defaultOptions);
+			await app!.start(opts.web ? false : undefined);
+			this.app = app;
+		});
+
+		after(async function () {
+			await this.app.stop();
+		});
+
+		sqlMain();
+		/*if (!opts.web) { setupDataLossTests(); }
+		if (!opts.web) { setupDataPreferencesTests(); }
+		setupDataSearchTests();
+		if (!opts.web) { setupDataNotebookTests(); }
+		setupDataLanguagesTests();
+		setupDataEditorTests();
+		setupDataStatusbarTests(!!opts.web);
+		if (!opts.web) { setupDataExtensionTests(); }
+		if (!opts.web) { setupDataMultirootTests(); }
+		if (!opts.web) { setupDataLocalizationTests(); }
+		if (!opts.web) { setupLaunchTests(); }*/
+	});
 });
+

@@ -174,7 +174,13 @@ export enum ModelComponentTypes {
 	Hyperlink,
 	Image,
 	RadioCardGroup,
-	Separator
+	TabbedPanel,
+	Separator,
+	PropertiesContainer
+}
+
+export enum ModelViewAction {
+	SelectTab = 'selectTab'
 }
 
 export enum ColumnSizingMode {
@@ -243,12 +249,12 @@ export interface IComponentEventArgs {
 
 export interface IModelViewDialogDetails {
 	title: string;
-	isWide: boolean;
 	content: string | number[];
 	okButton: number;
 	cancelButton: number;
 	customButtons: number[];
 	message: DialogMessage;
+	width: DialogWidth;
 }
 
 export interface IModelViewTabDetails {
@@ -284,7 +290,10 @@ export interface IModelViewWizardDetails {
 	customButtons: number[];
 	message: DialogMessage;
 	displayPageTitles: boolean;
+	width: DialogWidth;
 }
+
+export type DialogWidth = 'narrow' | 'medium' | 'wide' | number;
 
 export enum MessageLevel {
 	Error = 0,
@@ -344,7 +353,8 @@ export enum DataProviderType {
 	CapabilitiesProvider = 'CapabilitiesProvider',
 	ObjectExplorerNodeProvider = 'ObjectExplorerNodeProvider',
 	SerializationProvider = 'SerializationProvider',
-	IconProvider = 'IconProvider'
+	IconProvider = 'IconProvider',
+	SqlAssessmentServicesProvider = 'SqlAssessmentServicesProvider'
 }
 
 export enum DeclarativeDataType {
@@ -394,7 +404,10 @@ export class TreeComponentItem extends vsExtTypes.TreeItem {
 export enum AzureResource {
 	ResourceManagement = 0,
 	Sql = 1,
-	OssRdbms = 2
+	OssRdbms = 2,
+	AzureKeyVault = 3,
+	Graph = 4,
+	MicrosoftResourceManagement = 5
 }
 
 export class TreeItem extends vsExtTypes.TreeItem {
@@ -826,3 +839,25 @@ export type QueryEventType =
 	| 'queryStop'
 	| 'executionPlan'
 	| 'visualize';
+
+export enum TabOrientation {
+	Vertical = 'vertical',
+	Horizontal = 'horizontal'
+}
+
+export interface TabbedPanelLayout {
+	orientation: TabOrientation;
+	showIcon: boolean;
+	alwaysShowTabs: boolean;
+}
+
+export enum SqlAssessmentTargetType {
+	Server = 1,
+	Database = 2
+}
+
+export enum SqlAssessmentResultItemKind {
+	RealResult = 0,
+	Warning = 1,
+	Error = 2
+}

@@ -3,7 +3,7 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ipcRenderer as ipc } from 'electron';
+import { ipcRenderer } from 'vs/base/parts/sandbox/electron-sandbox/globals';
 import { ExtensionHostProcessWorker } from 'vs/workbench/services/extensions/electron-browser/extensionHost';
 import { CachedExtensionScanner } from 'vs/workbench/services/extensions/electron-browser/cachedExtensionScanner';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
@@ -34,8 +34,8 @@ import { IProductService } from 'vs/platform/product/common/productService';
 import { Logger } from 'vs/workbench/services/extensions/common/extensionPoints';
 import { flatten } from 'vs/base/common/arrays';
 import { IStaticExtensionsService } from 'vs/workbench/services/extensions/common/staticExtensions';
-import { IElectronService } from 'vs/platform/electron/node/electron';
-import { IElectronEnvironmentService } from 'vs/workbench/services/electron/electron-browser/electronEnvironmentService';
+import { IElectronService } from 'vs/platform/electron/electron-sandbox/electron';
+import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/environment/electron-browser/environmentService';
 import { IRemoteExplorerService } from 'vs/workbench/services/remote/common/remoteExplorerService';
 import { Action } from 'vs/base/common/actions';
 import { SyncActionDescriptor } from 'vs/platform/actions/common/actions';
@@ -60,7 +60,7 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 	constructor(
 		@IInstantiationService instantiationService: IInstantiationService,
 		@INotificationService notificationService: INotificationService,
-		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
+		@IWorkbenchEnvironmentService protected readonly _environmentService: INativeWorkbenchEnvironmentService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IWorkbenchExtensionEnablementService extensionEnablementService: IWorkbenchExtensionEnablementService,
 		@IFileService fileService: IFileService,
@@ -73,14 +73,13 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 		@IStaticExtensionsService private readonly _staticExtensions: IStaticExtensionsService,
 		@IElectronService private readonly _electronService: IElectronService,
 		@IHostService private readonly _hostService: IHostService,
-		@IElectronEnvironmentService private readonly _electronEnvironmentService: IElectronEnvironmentService,
 		@IRemoteExplorerService private readonly _remoteExplorerService: IRemoteExplorerService,
 		@IExtensionGalleryService private readonly _extensionGalleryService: IExtensionGalleryService,
 	) {
 		super(
 			instantiationService,
 			notificationService,
-			environmentService,
+			_environmentService,
 			telemetryService,
 			extensionEnablementService,
 			fileService,
@@ -366,7 +365,7 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 
 		const result: ExtensionHostProcessManager[] = [];
 
-		const extHostProcessWorker = this._instantiationService.createInstance(ExtensionHostProcessWorker, autoStart, extensions, this._electronEnvironmentService.extHostLogsPath);
+		const extHostProcessWorker = this._instantiationService.createInstance(ExtensionHostProcessWorker, autoStart, extensions, this._environmentService.extHostLogsPath);
 		const extHostProcessManager = this._instantiationService.createInstance(ExtensionHostProcessManager, true, extHostProcessWorker, null, initialActivationEvents);
 		result.push(extHostProcessManager);
 
@@ -464,16 +463,13 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 			} catch (err) {
 				const remoteName = getRemoteName(remoteAuthority);
 				if (RemoteAuthorityResolverError.isNoResolverFound(err)) {
-					this._handleNoResolverFound(remoteName, allExtensions);
+					err.isHandled = await this._handleNoResolverFound(remoteName, allExtensions);
 				} else {
 					console.log(err);
-					if (RemoteAuthorityResolverError.isHandledNotAvailable(err)) {
-						console.log(`Not showing a notification for the error`);
-					} else {
-						this._notificationService.notify({ severity: Severity.Error, message: nls.localize('resolveAuthorityFailure', "Resolving the authority `{0}` failed", remoteName) });
+					if (RemoteAuthorityResolverError.isHandled(err)) {
+						console.log(`Error handled: Not showing a notification for the error`);
 					}
 				}
-
 				this._remoteAuthorityResolverService.setResolvedAuthorityError(remoteAuthority, err);
 
 				// Proceed with the local extension host
@@ -582,17 +578,17 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 	public _onExtensionHostExit(code: number): void {
 		if (this._isExtensionDevTestFromCli) {
 			// When CLI testing make sure to exit with proper exit code
-			ipc.send('vscode:exit', code);
+			ipcRenderer.send('vscode:exit', code);
 		} else {
 			// Expected development extension termination: When the extension host goes down we also shutdown the window
 			this._electronService.closeWindow();
 		}
 	}
 
-	private async _handleNoResolverFound(remoteName: string, allExtensions: IExtensionDescription[]): Promise<void> {
+	private async _handleNoResolverFound(remoteName: string, allExtensions: IExtensionDescription[]): Promise<boolean> {
 		const recommendation = this._productService.remoteExtensionTips?.[remoteName];
 		if (!recommendation) {
-			return;
+			return false;
 		}
 		const sendTelemetry = (userReaction: 'install' | 'enable' | 'cancel') => {
 			/* __GDPR__
@@ -608,7 +604,7 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 		const extension = allExtensions.filter(e => e.identifier.value === resolverExtensionId)[0];
 		if (extension) {
 			if (this._isDisabled(extension)) {
-				const message = nls.localize('enableResolver', "Extension '{0}' is required to open the remote window.\nOk to enable?", recommendation.friendlyName);
+				const message = nls.localize('enableResolver', "Extension '{0}' is required to open the remote window.\nOK to enable?", recommendation.friendlyName);
 				this._notificationService.prompt(Severity.Info, message,
 					[{
 						label: nls.localize('enable', 'Enable and Reload'),
@@ -623,7 +619,7 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 			}
 		} else {
 			// Install the Extension and reload the window to handle.
-			const message = nls.localize('installResolver', "Extension '{0}' is required to open the remote window.\nOk to install?", recommendation.friendlyName);
+			const message = nls.localize('installResolver', "Extension '{0}' is required to open the remote window.\nDo you want to install the extension?", recommendation.friendlyName);
 			this._notificationService.prompt(Severity.Info, message,
 				[{
 					label: nls.localize('install', 'Install and Reload'),
@@ -646,6 +642,7 @@ export class ExtensionService extends AbstractExtensionService implements IExten
 			);
 
 		}
+		return true;
 
 	}
 }
@@ -674,7 +671,7 @@ registerSingleton(IExtensionService, ExtensionService);
 class RestartExtensionHostAction extends Action {
 
 	public static readonly ID = 'workbench.action.restartExtensionHost';
-	public static readonly LABEL = nls.localize('restartExtensionHost', "Developer: Restart Extension Host");
+	public static readonly LABEL = nls.localize('restartExtensionHost', "Restart Extension Host");
 
 	constructor(
 		id: string,
@@ -690,4 +687,4 @@ class RestartExtensionHostAction extends Action {
 }
 
 const registry = Registry.as<IWorkbenchActionRegistry>(ActionExtensions.WorkbenchActions);
-registry.registerWorkbenchAction(SyncActionDescriptor.create(RestartExtensionHostAction, RestartExtensionHostAction.ID, RestartExtensionHostAction.LABEL), 'Developer: Restart Extension Host');
+registry.registerWorkbenchAction(SyncActionDescriptor.from(RestartExtensionHostAction), 'Developer: Restart Extension Host', nls.localize('developer', "Developer"));

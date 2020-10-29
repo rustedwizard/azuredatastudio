@@ -32,14 +32,31 @@ import { AccountProviderAddedEventParams, UpdateAccountListEventParams } from 's
 import { IClipboardService } from 'sql/platform/clipboard/common/clipboardService';
 import * as TelemetryKeys from 'sql/platform/telemetry/common/telemetryKeys';
 import { ILogService } from 'vs/platform/log/common/log';
-import { IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
 import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
-import { IViewPaneOptions, ViewPane } from 'vs/workbench/browser/parts/views/viewPaneContainer';
+import { IViewPaneOptions, ViewPane, ViewPaneContainer } from 'vs/workbench/browser/parts/views/viewPaneContainer';
 import { attachModalDialogStyler, attachPanelStyler } from 'sql/workbench/common/styler';
-import { IViewDescriptorService } from 'vs/workbench/common/views';
+import { IViewDescriptorService, IViewsRegistry, Extensions as ViewContainerExtensions, IViewContainersRegistry, ViewContainerLocation } from 'vs/workbench/common/views';
+import { IQuickInputService, IQuickPickItem } from 'vs/platform/quickinput/common/quickInput';
+import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
+import { Registry } from 'vs/platform/registry/common/platform';
+import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
+
+export const VIEWLET_ID = 'workbench.view.accountpanel';
+
+export class AccountPaneContainer extends ViewPaneContainer {
+
+}
+
+export const ACCOUNT_VIEW_CONTAINER = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
+	id: VIEWLET_ID,
+	name: localize('accountExplorer.name', "Accounts"),
+	ctorDescriptor: new SyncDescriptor(AccountPaneContainer),
+	storageId: `${VIEWLET_ID}.state`
+}, ViewContainerLocation.Sidebar);
 
 class AccountPanel extends ViewPane {
 	public index: number;
@@ -123,7 +140,7 @@ export class AccountDialog extends Modal {
 	public get onCloseEvent(): Event<void> { return this._onCloseEmitter.event; }
 
 	constructor(
-		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
+		@ILayoutService layoutService: ILayoutService,
 		@IThemeService themeService: IThemeService,
 		@IInstantiationService private _instantiationService: IInstantiationService,
 		@IContextMenuService private _contextMenuService: IContextMenuService,
@@ -135,8 +152,10 @@ export class AccountDialog extends Modal {
 		@ILogService logService: ILogService,
 		@IViewDescriptorService private viewDescriptorService: IViewDescriptorService,
 		@ITextResourcePropertiesService textResourcePropertiesService: ITextResourcePropertiesService,
+		@IQuickInputService private _quickInputService: IQuickInputService,
+		@INotificationService private _notificationService: INotificationService,
 		@IOpenerService protected readonly openerService: IOpenerService,
-		@ITelemetryService private readonly vstelemetryService: ITelemetryService,
+		@ITelemetryService private readonly vstelemetryService: ITelemetryService
 	) {
 		super(
 			localize('linkedAccounts', "Linked accounts"),
@@ -199,8 +218,34 @@ export class AccountDialog extends Modal {
 		this._addAccountButton = new Button(buttonSection);
 		this._addAccountButton.label = localize('accountDialog.addConnection', "Add an account");
 
-		this._register(this._addAccountButton.onDidClick(() => {
-			(<IProviderViewUiComponent>values(this._providerViewsMap)[0]).addAccountAction.run();
+		this._register(this._addAccountButton.onDidClick(async () => {
+			const vals = values(this._providerViewsMap);
+
+			let pickedValue: string;
+			if (vals.length === 0) {
+				this._notificationService.error(localize('accountDialog.noCloudsRegistered', "You have no clouds enabled. Go to Settings -> Search Azure Account Configuration -> Enable at least one cloud"));
+				return;
+			}
+			if (vals.length > 1) {
+				const buttons: IQuickPickItem[] = vals.map(v => {
+					return { label: v.view.title } as IQuickPickItem;
+				});
+
+				const picked = await this._quickInputService.pick(buttons, { canPickMany: false });
+
+				pickedValue = picked?.label;
+			} else {
+				pickedValue = vals[0].view.title;
+			}
+
+			const v = vals.filter(v => v.view.title === pickedValue)?.[0];
+
+			if (!v) {
+				this._notificationService.error(localize('accountDialog.didNotPickAuthProvider', "You didn't select any authentication provider. Please try again."));
+				return;
+			}
+
+			v.addAccountAction.run();
 		}));
 
 		DOM.append(container, this._noaccountViewContainer);
@@ -298,8 +343,7 @@ export class AccountDialog extends Modal {
 		let providerView = new AccountPanel(
 			{
 				id: newProvider.addedProvider.id,
-				title: newProvider.addedProvider.displayName,
-				ariaHeaderLabel: newProvider.addedProvider.displayName
+				title: newProvider.addedProvider.displayName
 			},
 			this._keybindingService,
 			this._contextMenuService,
@@ -312,12 +356,19 @@ export class AccountDialog extends Modal {
 			this.vstelemetryService
 		);
 
+		Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews([{
+			id: newProvider.addedProvider.id,
+			name: newProvider.addedProvider.displayName,
+			ctorDescriptor: new SyncDescriptor(AccountPanel),
+		}], ACCOUNT_VIEW_CONTAINER);
+
 		attachPanelStyler(providerView, this._themeService);
 
 		const insertIndex = this._splitView.length;
+		providerView.render();
+
 		// Append the list view to the split view
 		this._splitView.addView(providerView, Sizing.Distribute, insertIndex);
-		providerView.render();
 		providerView.index = insertIndex;
 
 		this._splitView.layout(DOM.getContentHeight(this._container));

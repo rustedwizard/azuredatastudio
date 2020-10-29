@@ -17,10 +17,10 @@ import { ModelComponentWrapper } from 'sql/workbench/browser/modelComponents/mod
 import { URI } from 'vs/base/common/uri';
 import * as nls from 'vs/nls';
 import { EventType, addDisposableListener } from 'vs/base/browser/dom';
-import { IKeyboardEvent, StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { endsWith } from 'vs/base/common/strings';
+import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { firstIndex } from 'vs/base/common/arrays';
 import { IComponentDescriptor, IComponent, IModelStore, IComponentEventArgs, ComponentEventType } from 'sql/platform/dashboard/browser/interfaces';
+import { convertSize } from 'sql/base/browser/dom';
 
 export type IUserFriendlyIcon = string | URI | { light: string | URI; dark: string | URI };
 
@@ -215,37 +215,12 @@ export abstract class ComponentBase extends Disposable implements IComponent, On
 		this.setPropertyFromUI<azdata.ComponentProperties, { [key: string]: string }>((properties, CSSStyles) => { properties.CSSStyles = CSSStyles; }, newValue);
 	}
 
-	public convertSizeToNumber(size: number | string): number {
-		if (size && typeof (size) === 'string') {
-			if (endsWith(size.toLowerCase(), 'px')) {
-				return +size.replace('px', '');
-			} else if (endsWith(size.toLowerCase(), 'em')) {
-				return +size.replace('em', '') * 11;
-			}
-		} else if (!size) {
-			return 0;
-		}
-		return +size;
-	}
-
 	protected getWidth(): string {
-		return this.width ? this.convertSize(this.width) : '';
+		return this.width ? convertSize(this.width) : '';
 	}
 
 	protected getHeight(): string {
-		return this.height ? this.convertSize(this.height) : '';
-	}
-
-	public convertSize(size: number | string, defaultValue?: string): string {
-		defaultValue = defaultValue || '';
-		if (types.isUndefinedOrNull(size)) {
-			return defaultValue;
-		}
-		let convertedSize: string = size ? size.toString() : defaultValue;
-		if (!endsWith(convertedSize.toLowerCase(), 'px') && !endsWith(convertedSize.toLowerCase(), '%')) {
-			convertedSize = convertedSize + 'px';
-		}
-		return convertedSize;
+		return this.height ? convertSize(this.height) : '';
 	}
 
 	public get valid(): boolean {
@@ -291,7 +266,11 @@ export abstract class ComponentBase extends Disposable implements IComponent, On
 		(<HTMLElement>this._el.nativeElement).focus();
 	}
 
-	protected onkeydown(domNode: HTMLElement, listener: (e: IKeyboardEvent) => void): void {
+	public doAction(action: string, ...args: any[]): void {
+		// no-op, components should override this if they want to handle actions
+	}
+
+	protected onkeydown(domNode: HTMLElement, listener: (e: StandardKeyboardEvent) => void): void {
 		this._register(addDisposableListener(domNode, EventType.KEY_DOWN, (e: KeyboardEvent) => listener(new StandardKeyboardEvent(e))));
 	}
 }
@@ -332,6 +311,7 @@ export abstract class ContainerBase<T> extends ComponentBase {
 			}
 		}));
 		this._changeRef.detectChanges();
+		this.onItemsUpdated();
 		return;
 	}
 
@@ -343,6 +323,7 @@ export abstract class ContainerBase<T> extends ComponentBase {
 		if (index >= 0) {
 			this.items.splice(index, 1);
 			this._changeRef.detectChanges();
+			this.onItemsUpdated();
 			return true;
 		}
 		return false;
@@ -350,7 +331,9 @@ export abstract class ContainerBase<T> extends ComponentBase {
 
 	public clearContainer(): void {
 		this.items = [];
+		this.onItemsUpdated();
 		this._changeRef.detectChanges();
+		this.validate();
 	}
 
 	public setProperties(properties: { [key: string]: any; }): void {
@@ -373,4 +356,25 @@ export abstract class ContainerBase<T> extends ComponentBase {
 	}
 
 	abstract setLayout(layout: any): void;
+
+	public setItemLayout(componentDescriptor: IComponentDescriptor, config: any): void {
+		if (!componentDescriptor) {
+			return;
+		}
+		const item = this.items.find(item => item.descriptor.id === componentDescriptor.id && item.descriptor.type === componentDescriptor.type);
+		if (item) {
+			item.config = config;
+			this.onItemLayoutUpdated(item);
+			this._changeRef.detectChanges();
+		} else {
+			throw new Error(`Unable to set item layout - unknown item ${componentDescriptor.id}`);
+		}
+		return;
+	}
+
+	protected onItemsUpdated(): void {
+	}
+
+	protected onItemLayoutUpdated(item: ItemDescriptor<T>): void {
+	}
 }

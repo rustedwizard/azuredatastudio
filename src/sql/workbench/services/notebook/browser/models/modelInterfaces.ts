@@ -15,13 +15,23 @@ import { CellType, NotebookChangeType } from 'sql/workbench/services/notebook/co
 import { INotebookManager, ILanguageMagic } from 'sql/workbench/services/notebook/browser/notebookService';
 import { IConnectionProfile } from 'sql/platform/connection/common/interfaces';
 import { IConnectionManagementService } from 'sql/platform/connection/common/connectionManagement';
-import { ISingleNotebookEditOperation } from 'sql/workbench/api/common/sqlExtHostTypes';
 import { IStandardKernelWithProvider } from 'sql/workbench/services/notebook/browser/models/notebookUtils';
 import { ConnectionProfile } from 'sql/platform/connection/common/connectionProfile';
 import { ICapabilitiesService } from 'sql/platform/capabilities/common/capabilitiesService';
 import { NotebookModel } from 'sql/workbench/services/notebook/browser/models/notebookModel';
 import { IModelContentChangedEvent } from 'vs/editor/common/model/textModelEvents';
 import type { FutureInternal } from 'sql/workbench/services/notebook/browser/interfaces';
+
+export interface ICellRange {
+	readonly start: number;
+	readonly end: number;
+}
+
+export interface ISingleNotebookEditOperation {
+	range: ICellRange;
+	cell: Partial<nb.ICellContents>;
+	forceMoveMarkers: boolean;
+}
 
 export interface IClientSessionOptions {
 	notebookUri: URI;
@@ -119,11 +129,6 @@ export interface IClientSession extends IDisposable {
 	readonly kernelChangeCompleted: Promise<void>;
 
 	/**
-	 * The kernel preference.
-	 */
-	kernelPreference: IKernelPreference;
-
-	/**
 	 * The display name of the kernel.
 	 */
 	readonly kernelDisplayName: string;
@@ -213,41 +218,6 @@ export interface IClientSession extends IDisposable {
 	onKernelChanging(changeHandler: ((kernel: nb.IKernelChangedArgs) => Promise<void>)): void;
 }
 
-/**
- * A kernel preference.
- */
-export interface IKernelPreference {
-	/**
-	 * The name of the kernel.
-	 */
-	readonly name?: string;
-
-	/**
-	 * The preferred kernel language.
-	 */
-	readonly language?: string;
-
-	/**
-	 * The id of an existing kernel.
-	 */
-	readonly id?: string;
-
-	/**
-	 * Whether to prefer starting a kernel.
-	 */
-	readonly shouldStart?: boolean;
-
-	/**
-	 * Whether a kernel can be started.
-	 */
-	readonly canStart?: boolean;
-
-	/**
-	 * Whether to auto-start the default kernel if no matching kernel is found.
-	 */
-	readonly autoStartDefault?: boolean;
-}
-
 export interface INotebookModel {
 	/**
 	 * Cell List for this model
@@ -263,6 +233,10 @@ export interface INotebookModel {
 	 * Client Session in the notebook, used for sending requests to the notebook service
 	 */
 	readonly clientSession: IClientSession;
+	/**
+	 * Promise indicating when client session is ready to use.
+	 */
+	readonly sessionLoadFinished: Promise<void>;
 	/**
 	 * LanguageInfo saved in the notebook
 	 */
@@ -468,6 +442,7 @@ export interface ICellModel {
 	executionCount: number | undefined;
 	readonly future: FutureInternal;
 	readonly outputs: ReadonlyArray<nb.ICellOutput>;
+	renderedOutputTextContent?: string[];
 	readonly onOutputsChanged: Event<IOutputChangedEvent>;
 	readonly onExecutionStateChange: Event<CellExecutionState>;
 	readonly executionState: CellExecutionState;
@@ -483,9 +458,10 @@ export interface ICellModel {
 	readonly onLoaded: Event<string>;
 	isCollapsed: boolean;
 	readonly onCollapseStateChanged: Event<boolean>;
+	readonly onCellModeChanged: Event<boolean>;
 	modelContentChangedEvent: IModelContentChangedEvent;
 	isEditMode: boolean;
-	readonly ariaLabel: string;
+	sendChangeToNotebook(change: NotebookChangeType): void;
 }
 
 export interface IModelFactory {

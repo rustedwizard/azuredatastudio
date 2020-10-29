@@ -13,9 +13,9 @@ import { URI } from 'vs/base/common/uri';
 import { IOpenEditorOverrideHandler, IOpenEditorOverride, IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IDisposable, toDisposable, dispose } from 'vs/base/common/lifecycle';
 import { isUndefinedOrNull } from 'vs/base/common/types';
-import { IEditorInput, EditorInput } from 'vs/workbench/common/editor';
+import { IEditorInput, EditorInput, IUntitledTextResourceEditorInput } from 'vs/workbench/common/editor';
 import { ITextEditorOptions, IEditorOptions } from 'vs/platform/editor/common/editor';
-import { IEditorGroup } from 'vs/workbench/services/editor/common/editorGroupsService';
+import { IEditorGroup, OpenEditorContext } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { FileEditorInput } from 'vs/workbench/contrib/files/common/editors/fileEditorInput';
 import { QueryEditorInput } from 'sql/workbench/common/editor/query/queryEditorInput';
 import { Registry } from 'vs/platform/registry/common/platform';
@@ -29,8 +29,12 @@ import { UntitledQueryEditorInput } from 'sql/workbench/common/editor/query/unti
 import { INotebookService } from 'sql/workbench/services/notebook/browser/notebookService';
 import { NotebookServiceStub } from 'sql/workbench/contrib/notebook/test/stubs';
 import { IUntitledTextEditorService } from 'vs/workbench/services/untitled/common/untitledTextEditorService';
+import { IQueryEditorService } from 'sql/workbench/services/queryEditor/common/queryEditorService';
+import { TestQueryEditorService } from 'sql/workbench/services/queryEditor/test/common/testQueryEditorService';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 
 const languageAssociations = Registry.as<ILanguageAssociationRegistry>(LanguageAssociationExtensions.LanguageAssociations);
+
 
 suite('Editor Replacer Contribution', () => {
 	let disposables: IDisposable[] = [];
@@ -40,6 +44,9 @@ suite('Editor Replacer Contribution', () => {
 		disposables.push(languageAssociations.registerLanguageAssociation(NotebookEditorInputAssociation.languages, NotebookEditorInputAssociation));
 		const instantiationService = workbenchInstantiationService();
 		instantiationService.stub(INotebookService, new NotebookServiceStub());
+		const editorService = new MockEditorService(instantiationService);
+		instantiationService.stub(IEditorService, editorService);
+		instantiationService.stub(IQueryEditorService, instantiationService.createInstance(TestQueryEditorService));
 		instantiationService.invokeFunction(accessor => {
 			languageAssociations.start(accessor);
 		});
@@ -50,7 +57,8 @@ suite('Editor Replacer Contribution', () => {
 	});
 
 	test('does proper lifecycle', () => {
-		const editorService = new MockEditorService();
+		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		const modeService = new TestModeService();
 		const contrib = new EditorReplacementContribution(editorService, modeService);
 		assert.equal(editorService.overridenOpens.length, 1);
@@ -59,12 +67,12 @@ suite('Editor Replacer Contribution', () => {
 	});
 
 	test('does replace sql file input from uri (no mode service)', async () => {
-		const editorService = new MockEditorService();
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const input = instantiationService.createInstance(FileEditorInput, URI.file('/test/file.sql'), undefined, undefined);
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response?.override);
 		const newinput = <any>(await response.override) as EditorInput; // our test service returns this so we are fine to cast this
 
@@ -74,12 +82,12 @@ suite('Editor Replacer Contribution', () => {
 	});
 
 	test('does replace sql file input using input mode', async () => {
-		const editorService = new MockEditorService();
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const input = instantiationService.createInstance(FileEditorInput, URI.file('/test/file.other'), undefined, 'sql');
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response?.override);
 		const newinput = <any>(await response.override) as EditorInput; // our test service returns this so we are fine to cast this
 
@@ -88,13 +96,13 @@ suite('Editor Replacer Contribution', () => {
 		contrib.dispose();
 	});
 
-	test('does replace notebook file input using input mode', async () => {
-		const editorService = new MockEditorService();
+	test('does replace notebook file input using input extension notebook', async () => {
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const input = instantiationService.createInstance(FileEditorInput, URI.file('/test/file.notebook'), undefined, undefined);
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response?.override);
 		const newinput = <any>(await response.override) as EditorInput; // our test service returns this so we are fine to cast this
 
@@ -103,13 +111,13 @@ suite('Editor Replacer Contribution', () => {
 		contrib.dispose();
 	});
 
-	test('does replace notebook file input using input mode', async () => {
-		const editorService = new MockEditorService();
+	test('does replace notebook file input using input extension iynb', async () => {
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const input = instantiationService.createInstance(FileEditorInput, URI.file('/test/file.iynb'), undefined, 'notebook');
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response?.override);
 		const newinput = <any>(await response.override) as EditorInput; // our test service returns this so we are fine to cast this
 
@@ -118,16 +126,16 @@ suite('Editor Replacer Contribution', () => {
 		contrib.dispose();
 	});
 
-	test('does replace notebook file input using input mode', async () => {
-		const editorService = new MockEditorService();
+	test('does replace file input using default mode', async function () {
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const accessor = instantiationService.createInstance(ServiceAccessor);
 		const service = accessor.untitledTextEditorService;
 
 		const input = instantiationService.createInstance(UntitledTextEditorInput, service.create());
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response?.override);
 		const newinput = <any>(await response.override) as EditorInput; // our test service returns this so we are fine to cast this
 
@@ -137,29 +145,29 @@ suite('Editor Replacer Contribution', () => {
 	});
 
 	test('does not replace editors that it shouldnt', async () => {
-		const editorService = new MockEditorService();
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const accessor = instantiationService.createInstance(ServiceAccessor);
 		const service = accessor.untitledTextEditorService;
 		const untitled = instantiationService.createInstance(UntitledTextEditorInput, service.create());
 		const input = instantiationService.createInstance(UntitledQueryEditorInput, '', untitled, undefined);
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response === undefined);
 
 		contrib.dispose();
 	});
 
 	test('does not replace editors if it doesnt have a replacer', async () => {
-		const editorService = new MockEditorService();
 		const instantiationService = workbenchInstantiationService();
+		const editorService = new MockEditorService(instantiationService);
 		instantiationService.stub(IEditorService, editorService);
 		const contrib = instantiationService.createInstance(EditorReplacementContribution);
 		const accessor = instantiationService.createInstance(ServiceAccessor);
 		const service = accessor.untitledTextEditorService;
 		const input = instantiationService.createInstance(UntitledTextEditorInput, service.create({ associatedResource: URI.file('/test/file.unknown') }));
-		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup);
+		const response = editorService.fireOpenEditor(input, undefined, undefined as IEditorGroup, OpenEditorContext.NEW_EDITOR);
 		assert(response === undefined);
 
 		contrib.dispose();
@@ -167,6 +175,10 @@ suite('Editor Replacer Contribution', () => {
 });
 
 class MockEditorService extends TestEditorService {
+
+	constructor(private readonly instantiationService: IInstantiationService) {
+		super();
+	}
 	readonly overridenOpens: IOpenEditorOverrideHandler[] = [];
 
 	overrideOpenEditor(_handler: IOpenEditorOverrideHandler): IDisposable {
@@ -179,10 +191,10 @@ class MockEditorService extends TestEditorService {
 		});
 	}
 
-	fireOpenEditor(editor: IEditorInput, options: IEditorOptions | ITextEditorOptions | undefined, group: IEditorGroup) {
+	fireOpenEditor(editor: IEditorInput, options: IEditorOptions | ITextEditorOptions | undefined, group: IEditorGroup, context: OpenEditorContext, id?: string) {
 		for (const handler of this.overridenOpens) {
 			let response: IOpenEditorOverride | undefined;
-			if (response = handler(editor, options, group)) {
+			if (response = handler.open(editor, options, group, context, id)) {
 				return response;
 			}
 		}
@@ -192,11 +204,18 @@ class MockEditorService extends TestEditorService {
 	openEditor(_editor: any, _options?: any, _group?: any): Promise<any> {
 		return Promise.resolve(_editor);
 	}
+
+	createEditorInput(_input: IUntitledTextResourceEditorInput): EditorInput {
+		const accessor = this.instantiationService.createInstance(ServiceAccessor);
+		const service = accessor.untitledTextEditorService;
+		return this.instantiationService.createInstance(UntitledTextEditorInput, service.create());
+	}
 }
 
 class TestModeService implements IModeService {
 	_serviceBrand: undefined;
 	onDidCreateMode: Event<IMode>;
+	onLanguagesMaybeChanged: Event<void>;
 
 	isRegisteredMode(mimetypeOrModeId: string): boolean {
 		throw new Error('Method not implemented.');

@@ -12,7 +12,7 @@ import * as objects from 'vs/base/common/objects';
 import { CellTypes } from 'sql/workbench/services/notebook/common/contracts';
 import { ModelFactory } from 'sql/workbench/services/notebook/browser/models/modelFactory';
 import { NotebookModelStub, ClientSessionStub, KernelStub, FutureStub } from 'sql/workbench/contrib/notebook/test/stubs';
-import { EmptyFuture } from 'sql/workbench/services/notebook/browser/sessionManager';
+import { EmptyFuture } from 'sql/workbench/contrib/notebook/test/emptySessionClasses';
 import { ICellModel, ICellModelOptions, IClientSession, INotebookModel } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
 import { Deferred } from 'sql/base/common/promise';
 import { ServiceCollection } from 'vs/platform/instantiation/common/serviceCollection';
@@ -833,4 +833,39 @@ suite('Cell Model', function (): void {
 			assert.strictEqual(actualMsg, testMsg);
 		});
 	});
+
+	test('Should emit event on markdown cell edit', async function (): Promise<void> {
+		let notebookModel = new NotebookModelStub({
+			name: '',
+			version: '',
+			mimetype: ''
+		});
+		let contents: nb.ICellContents = {
+			cell_type: CellTypes.Markdown,
+			source: ''
+		};
+		let model = factory.createCell(contents, { notebook: notebookModel, isTrusted: false });
+		assert(!model.isEditMode);
+
+		let createCellModePromise = () => {
+			return new Promise((resolve, reject) => {
+				setTimeout((error) => reject(error), 2000);
+				model.onCellModeChanged(isEditMode => {
+					resolve(isEditMode);
+				});
+			});
+		};
+
+		assert(!model.isEditMode);
+		let cellModePromise = createCellModePromise();
+		model.isEditMode = true;
+		let isEditMode = await cellModePromise;
+		assert(isEditMode);
+
+		cellModePromise = createCellModePromise();
+		model.isEditMode = false;
+		isEditMode = await cellModePromise;
+		assert(!isEditMode);
+	});
+
 });

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import 'vs/css!./media/tabstitlecontrol';
-import { isMacintosh } from 'vs/base/common/platform';
+import { isMacintosh, isWindows } from 'vs/base/common/platform';
 import { shorten } from 'vs/base/common/labels';
 import { toResource, GroupIdentifier, IEditorInput, Verbosity, EditorCommandsContextActionRunner, IEditorPartOptions, SideBySideEditor } from 'vs/workbench/common/editor';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
@@ -19,30 +19,32 @@ import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IMenuService } from 'vs/platform/actions/common/actions';
 import { TitleControl } from 'vs/workbench/browser/parts/editor/titleControl';
-import { IQuickOpenService } from 'vs/platform/quickOpen/common/quickOpen';
+import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
 import { IDisposable, dispose, DisposableStore, combinedDisposable, MutableDisposable } from 'vs/base/common/lifecycle';
 import { ScrollableElement } from 'vs/base/browser/ui/scrollbar/scrollableElement';
 import { ScrollbarVisibility } from 'vs/base/common/scrollable';
 import { getOrSet } from 'vs/base/common/map';
-import { IThemeService, registerThemingParticipant, ITheme, ICssStyleCollector, HIGH_CONTRAST } from 'vs/platform/theme/common/themeService';
-import { TAB_INACTIVE_BACKGROUND, TAB_ACTIVE_BACKGROUND, TAB_ACTIVE_FOREGROUND, TAB_INACTIVE_FOREGROUND, TAB_BORDER, EDITOR_DRAG_AND_DROP_BACKGROUND, TAB_UNFOCUSED_ACTIVE_FOREGROUND, TAB_UNFOCUSED_INACTIVE_FOREGROUND, TAB_UNFOCUSED_ACTIVE_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BORDER, TAB_ACTIVE_BORDER, TAB_HOVER_BACKGROUND, TAB_HOVER_BORDER, TAB_UNFOCUSED_HOVER_BACKGROUND, TAB_UNFOCUSED_HOVER_BORDER, EDITOR_GROUP_HEADER_TABS_BACKGROUND, WORKBENCH_BACKGROUND, TAB_ACTIVE_BORDER_TOP, TAB_UNFOCUSED_ACTIVE_BORDER_TOP, TAB_ACTIVE_MODIFIED_BORDER, TAB_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_ACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_MODIFIED_BORDER } from 'vs/workbench/common/theme';
+import { IThemeService, registerThemingParticipant, IColorTheme, ICssStyleCollector, HIGH_CONTRAST } from 'vs/platform/theme/common/themeService';
+import { TAB_INACTIVE_BACKGROUND, TAB_ACTIVE_BACKGROUND, TAB_ACTIVE_FOREGROUND, TAB_INACTIVE_FOREGROUND, TAB_BORDER, EDITOR_DRAG_AND_DROP_BACKGROUND, TAB_UNFOCUSED_ACTIVE_FOREGROUND, TAB_UNFOCUSED_INACTIVE_FOREGROUND, TAB_UNFOCUSED_ACTIVE_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BORDER, TAB_ACTIVE_BORDER, TAB_HOVER_BACKGROUND, TAB_HOVER_BORDER, TAB_UNFOCUSED_HOVER_BACKGROUND, TAB_UNFOCUSED_HOVER_BORDER, EDITOR_GROUP_HEADER_TABS_BACKGROUND, WORKBENCH_BACKGROUND, TAB_ACTIVE_BORDER_TOP, TAB_UNFOCUSED_ACTIVE_BORDER_TOP, TAB_ACTIVE_MODIFIED_BORDER, TAB_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_ACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_BACKGROUND, TAB_HOVER_FOREGROUND, TAB_UNFOCUSED_HOVER_FOREGROUND, EDITOR_GROUP_HEADER_TABS_BORDER } from 'vs/workbench/common/theme';
 import { activeContrastBorder, contrastBorder, editorBackground, breadcrumbsBackground } from 'vs/platform/theme/common/colorRegistry';
-import { ResourcesDropHandler, fillResourceDataTransfers, DraggedEditorIdentifier, DraggedEditorGroupIdentifier, DragAndDropObserver } from 'vs/workbench/browser/dnd';
+import { ResourcesDropHandler, DraggedEditorIdentifier, DraggedEditorGroupIdentifier, DragAndDropObserver } from 'vs/workbench/browser/dnd';
 import { Color } from 'vs/base/common/color';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { MergeGroupMode, IMergeGroupOptions, GroupsArrangement } from 'vs/workbench/services/editor/common/editorGroupsService';
+import { MergeGroupMode, IMergeGroupOptions, GroupsArrangement, IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { addClass, addDisposableListener, hasClass, EventType, EventHelper, removeClass, Dimension, scheduleAtNextAnimationFrame, findParentWithClass, clearNode } from 'vs/base/browser/dom';
 import { localize } from 'vs/nls';
-import { IEditorGroupsAccessor, IEditorGroupView, EditorServiceImpl } from 'vs/workbench/browser/parts/editor/editor';
+import { IEditorGroupsAccessor, IEditorGroupView, EditorServiceImpl, EDITOR_TITLE_HEIGHT, computeEditorAriaLabel } from 'vs/workbench/browser/parts/editor/editor';
 import { CloseOneEditorAction } from 'vs/workbench/browser/parts/editor/editorActions';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { BreadcrumbsControl } from 'vs/workbench/browser/parts/editor/breadcrumbsControl';
 import { IFileService } from 'vs/platform/files/common/files';
 import { withNullAsUndefined, assertAllDefined, assertIsDefined } from 'vs/base/common/types';
-import { ILabelService } from 'vs/platform/label/common/label';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { basenameOrAuthority } from 'vs/base/common/resources';
+import { RunOnceScheduler } from 'vs/base/common/async';
+import { IPathService } from 'vs/workbench/services/path/common/pathService';
+import { IPath, win32, posix } from 'vs/base/common/path';
 
 // {{SQL CARBON EDIT}} -- Display the editor's tab color
 import * as QueryConstants from 'sql/platform/query/common/constants';
@@ -53,13 +55,25 @@ interface IEditorInputLabel {
 	name?: string;
 	description?: string;
 	title?: string;
+	ariaLabel?: string;
 }
 
 type AugmentedLabel = IEditorInputLabel & { editor: IEditorInput };
 
 export class TabsTitleControl extends TitleControl {
 
+	private static readonly SCROLLBAR_SIZES = {
+		default: 3,
+		large: 10
+	};
+
+	private static readonly TAB_SIZES = {
+		sticky: 38,
+		fit: 120
+	};
+
 	private titleContainer: HTMLElement | undefined;
+	private tabsAndActionsContainer: HTMLElement | undefined;
 	private tabsContainer: HTMLElement | undefined;
 	private editorToolbarContainer: HTMLElement | undefined;
 	private tabsScrollbar: ScrollableElement | undefined;
@@ -74,6 +88,8 @@ export class TabsTitleControl extends TitleControl {
 	private readonly layoutScheduled = this._register(new MutableDisposable());
 	private blockRevealActiveTab: boolean | undefined;
 
+	private path: IPath = isWindows ? win32 : posix;
+
 	constructor(
 		parent: HTMLElement,
 		accessor: IEditorGroupsAccessor,
@@ -85,27 +101,43 @@ export class TabsTitleControl extends TitleControl {
 		@ITelemetryService telemetryService: ITelemetryService,
 		@INotificationService notificationService: INotificationService,
 		@IMenuService menuService: IMenuService,
-		@IQuickOpenService quickOpenService: IQuickOpenService,
+		@IQuickInputService quickInputService: IQuickInputService,
 		@IThemeService themeService: IThemeService,
 		@IExtensionService extensionService: IExtensionService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IFileService fileService: IFileService,
-		@ILabelService labelService: ILabelService,
-		@IEditorService private readonly editorService: EditorServiceImpl
+		@IEditorService private readonly editorService: EditorServiceImpl,
+		@IPathService private readonly pathService: IPathService,
+		@IEditorGroupsService private readonly editorGroupService: IEditorGroupsService
 	) {
-		super(parent, accessor, group, contextMenuService, instantiationService, contextKeyService, keybindingService, telemetryService, notificationService, menuService, quickOpenService, themeService, extensionService, configurationService, fileService, labelService);
+		super(parent, accessor, group, contextMenuService, instantiationService, contextKeyService, keybindingService, telemetryService, notificationService, menuService, quickInputService, themeService, extensionService, configurationService, fileService);
 
 		this.tabResourceLabels = this._register(this.instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER));
 		this.closeOneEditorAction = this._register(this.instantiationService.createInstance(CloseOneEditorAction, CloseOneEditorAction.ID, CloseOneEditorAction.LABEL));
+
+		// Resolve the correct path library for the OS we are on
+		// If we are connected to remote, this accounts for the
+		// remote OS.
+		(async () => this.path = await this.pathService.path)();
+	}
+
+	protected registerListeners(): void {
+		super.registerListeners();
+
+		this._register(this.accessor.onDidEditorPartOptionsChange(e => {
+			if (e.oldPartOptions.titleScrollbarSizing !== e.newPartOptions.titleScrollbarSizing) {
+				this.updateTabsScrollbarSizing();
+			}
+		}));
 	}
 
 	protected create(parent: HTMLElement): void {
 		this.titleContainer = parent;
 
 		// Tabs and Actions Container (are on a single row with flex side-by-side)
-		const tabsAndActionsContainer = document.createElement('div');
-		addClass(tabsAndActionsContainer, 'tabs-and-actions-container');
-		this.titleContainer.appendChild(tabsAndActionsContainer);
+		this.tabsAndActionsContainer = document.createElement('div');
+		addClass(this.tabsAndActionsContainer, 'tabs-and-actions-container');
+		this.titleContainer.appendChild(this.tabsAndActionsContainer);
 
 		// Tabs Container
 		this.tabsContainer = document.createElement('div');
@@ -116,7 +148,7 @@ export class TabsTitleControl extends TitleControl {
 
 		// Tabs Scrollbar
 		this.tabsScrollbar = this._register(this.createTabsScrollbar(this.tabsContainer));
-		tabsAndActionsContainer.appendChild(this.tabsScrollbar.getDomNode());
+		this.tabsAndActionsContainer.appendChild(this.tabsScrollbar.getDomNode());
 
 		// Tabs Container listeners
 		this.registerTabsContainerListeners(this.tabsContainer, this.tabsScrollbar);
@@ -124,7 +156,7 @@ export class TabsTitleControl extends TitleControl {
 		// Editor Toolbar Container
 		this.editorToolbarContainer = document.createElement('div');
 		addClass(this.editorToolbarContainer, 'editor-actions');
-		tabsAndActionsContainer.appendChild(this.editorToolbarContainer);
+		this.tabsAndActionsContainer.appendChild(this.editorToolbarContainer);
 
 		// Editor Actions Toolbar
 		this.createEditorActionsToolBar(this.editorToolbarContainer);
@@ -139,10 +171,10 @@ export class TabsTitleControl extends TitleControl {
 	private createTabsScrollbar(scrollable: HTMLElement): ScrollableElement {
 		const tabsScrollbar = new ScrollableElement(scrollable, {
 			horizontal: ScrollbarVisibility.Auto,
+			horizontalScrollbarSize: this.getTabsScrollbarSizing(),
 			vertical: ScrollbarVisibility.Hidden,
 			scrollYToX: true,
-			useShadows: false,
-			horizontalScrollbarSize: 3
+			useShadows: false
 		});
 
 		tabsScrollbar.onScroll(e => {
@@ -152,17 +184,28 @@ export class TabsTitleControl extends TitleControl {
 		return tabsScrollbar;
 	}
 
+	private updateTabsScrollbarSizing(): void {
+		this.tabsScrollbar?.updateOptions({
+			horizontalScrollbarSize: this.getTabsScrollbarSizing()
+		});
+	}
+
+	private getTabsScrollbarSizing(): number {
+		if (this.accessor.partOptions.titleScrollbarSizing !== 'large') {
+			return TabsTitleControl.SCROLLBAR_SIZES.default;
+		}
+
+		return TabsTitleControl.SCROLLBAR_SIZES.large;
+	}
+
 	private updateBreadcrumbsControl(): void {
 		if (this.breadcrumbsControl && this.breadcrumbsControl.update()) {
-			// relayout when we have a breadcrumbs and when update changed
-			// its hidden-status
-			this.group.relayout();
+			this.group.relayout(); // relayout when we have a breadcrumbs and when update changed its hidden-status
 		}
 	}
 
 	protected handleBreadcrumbsEnablementChange(): void {
-		// relayout when breadcrumbs are enable/disabled
-		this.group.relayout();
+		this.group.relayout(); // relayout when breadcrumbs are enable/disabled
 	}
 
 	private registerTabsContainerListeners(tabsContainer: HTMLElement, tabsScrollbar: ScrollableElement): void {
@@ -174,7 +217,7 @@ export class TabsTitleControl extends TitleControl {
 		this._register(addDisposableListener(tabsContainer, EventType.SCROLL, () => {
 			if (hasClass(tabsContainer, 'scroll')) {
 				tabsScrollbar.setScrollPosition({
-					scrollLeft: tabsContainer.scrollLeft // during DND the  container gets scrolled so we need to update the custom scrollbar
+					scrollLeft: tabsContainer.scrollLeft // during DND the container gets scrolled so we need to update the custom scrollbar
 				});
 			}
 		}));
@@ -198,13 +241,13 @@ export class TabsTitleControl extends TitleControl {
 
 				EventHelper.stop(e);
 
-				this.group.openEditor(this.editorService.createInput({
-					forceUntitled: true,
-					options: {
+				this.group.openEditor(
+					this.editorService.createEditorInput({ forceUntitled: true }),
+					{
 						pinned: true,			// untitled is always pinned
 						index: this.group.count // always at the end
 					}
-				}));
+				);
 			}));
 		});
 
@@ -285,6 +328,37 @@ export class TabsTitleControl extends TitleControl {
 				}
 			}
 		}));
+
+		// Mouse-wheel support to switch to tabs optionally
+		this._register(addDisposableListener(tabsContainer, EventType.MOUSE_WHEEL, (e: MouseWheelEvent) => {
+			const activeEditor = this.group.activeEditor;
+			if (!activeEditor || this.group.count < 2) {
+				return;  // need at least 2 open editors
+			}
+
+			// Shift-key enables or disables this behaviour depending on the setting
+			if (this.accessor.partOptions.scrollToSwitchTabs === true) {
+				if (e.shiftKey) {
+					return; // 'on': only enable this when Shift-key is not pressed
+				}
+			} else {
+				if (!e.shiftKey) {
+					return; // 'off': only enable this when Shift-key is pressed
+				}
+			}
+
+			// Figure out scrolling direction
+			const nextEditor = this.group.getEditorByIndex(this.group.getIndexOfEditor(activeEditor) + (e.deltaX < 0 || e.deltaY < 0 /* scrolling up */ ? -1 : 1));
+			if (!nextEditor) {
+				return;
+			}
+
+			// Open it
+			this.group.openEditor(nextEditor);
+
+			// Disable normal scrolling, opening the editor will already reveal it properly
+			EventHelper.stop(e, true);
+		}));
 	}
 
 	protected updateEditorActionsToolbar(): void {
@@ -318,10 +392,6 @@ export class TabsTitleControl extends TitleControl {
 	}
 
 	closeEditors(editors: IEditorInput[]): void {
-		this.handleClosedEditors();
-	}
-
-	closeAllEditors(): void {
 		this.handleClosedEditors();
 	}
 
@@ -382,7 +452,24 @@ export class TabsTitleControl extends TitleControl {
 	}
 
 	pinEditor(editor: IEditorInput): void {
-		this.withTab(editor, (editor, index, tabContainer, tabLabelWidget, tabLabel) => this.redrawLabel(editor, tabContainer, tabLabelWidget, tabLabel));
+		this.withTab(editor, (editor, index, tabContainer, tabLabelWidget, tabLabel) => this.redrawLabel(editor, index, tabContainer, tabLabelWidget, tabLabel));
+	}
+
+	stickEditor(editor: IEditorInput): void {
+		this.doHandleStickyEditorChange(editor);
+	}
+
+	unstickEditor(editor: IEditorInput): void {
+		this.doHandleStickyEditorChange(editor);
+	}
+
+	private doHandleStickyEditorChange(editor: IEditorInput): void {
+
+		// Update tab
+		this.withTab(editor, (editor, index, tabContainer, tabLabelWidget, tabLabel) => this.redrawTab(editor, index, tabContainer, tabLabelWidget, tabLabel));
+
+		// A change to the sticky state requires a layout to keep the active editor visible
+		this.layout(this.dimension);
 	}
 
 	setActive(isGroupActive: boolean): void {
@@ -397,10 +484,16 @@ export class TabsTitleControl extends TitleControl {
 		this.layout(this.dimension);
 	}
 
+	private updateEditorLabelAggregator = this._register(new RunOnceScheduler(() => this.updateEditorLabels(), 0));
+
 	updateEditorLabel(editor: IEditorInput): void {
 
 		// Update all labels to account for changes to tab labels
-		this.updateEditorLabels();
+		// Since this method may be called a lot of times from
+		// individual editors, we collect all those requests and
+		// then run the update once because we have to update
+		// all opened tabs in the group at once.
+		this.updateEditorLabelAggregator.schedule();
 	}
 
 	updateEditorLabels(): void {
@@ -410,7 +503,7 @@ export class TabsTitleControl extends TitleControl {
 
 		// As such we need to redraw each label
 		this.forEachTab((editor, index, tabContainer, tabLabelWidget, tabLabel) => {
-			this.redrawLabel(editor, tabContainer, tabLabelWidget, tabLabel);
+			this.redrawLabel(editor, index, tabContainer, tabLabelWidget, tabLabel);
 		});
 
 		// A change to a label requires a layout to keep the active editor visible
@@ -471,7 +564,7 @@ export class TabsTitleControl extends TitleControl {
 		const tabContainer = document.createElement('div');
 		tabContainer.draggable = true;
 		tabContainer.tabIndex = 0;
-		tabContainer.setAttribute('role', 'presentation'); // cannot use role "tab" here due to https://github.com/Microsoft/vscode/issues/8659
+		tabContainer.setAttribute('role', 'tab');
 		addClass(tabContainer, 'tab');
 
 		// Gesture Support
@@ -668,10 +761,7 @@ export class TabsTitleControl extends TitleControl {
 			}
 
 			// Apply some datatransfer types to allow for dragging the element outside of the application
-			const resource = toResource(editor, { supportSideBySide: SideBySideEditor.MASTER });
-			if (resource) {
-				this.instantiationService.invokeFunction(fillResourceDataTransfers, [resource], e);
-			}
+			this.doFillResourceDataTransfers(editor, e);
 
 			// Fixes https://github.com/Microsoft/vscode/issues/18733
 			addClass(tab, 'dragged');
@@ -806,11 +896,12 @@ export class TabsTitleControl extends TitleControl {
 		const { verbosity, shortenDuplicates } = this.getLabelConfigFlags(labelFormat);
 
 		// Build labels and descriptions for each editor
-		const labels = this.group.editors.map(editor => ({
+		const labels = this.group.editors.map((editor, index) => ({
 			editor,
 			name: editor.getName(),
 			description: editor.getDescription(verbosity),
-			title: withNullAsUndefined(editor.getTitle(Verbosity.LONG))
+			title: withNullAsUndefined(editor.getTitle(Verbosity.LONG)),
+			ariaLabel: computeEditorAriaLabel(editor, index, this.group, this.editorGroupService.count)
 		}));
 
 		// Shorten labels as needed
@@ -881,7 +972,7 @@ export class TabsTitleControl extends TitleControl {
 			}
 
 			// Shorten descriptions
-			const shortenedDescriptions = shorten(descriptions);
+			const shortenedDescriptions = shorten(descriptions, this.path.sep);
 			descriptions.forEach((description, i) => {
 				for (const label of mapDescriptionToDuplicates.get(description) || []) {
 					label.description = shortenedDescriptions[i];
@@ -905,6 +996,18 @@ export class TabsTitleControl extends TitleControl {
 
 	private redraw(): void {
 
+		// Border below tabs if any
+		const tabsContainerBorderColor = this.getColor(EDITOR_GROUP_HEADER_TABS_BORDER);
+		if (this.tabsAndActionsContainer) {
+			if (tabsContainerBorderColor) {
+				addClass(this.tabsAndActionsContainer, 'tabs-border-bottom');
+				this.tabsAndActionsContainer.style.setProperty('--tabs-border-bottom-color', tabsContainerBorderColor.toString());
+			} else {
+				removeClass(this.tabsAndActionsContainer, 'tabs-border-bottom');
+				this.tabsAndActionsContainer.style.removeProperty('--tabs-border-bottom-color');
+			}
+		}
+
 		// For each tab
 		this.forEachTab((editor, index, tabContainer, tabLabelWidget, tabLabel) => {
 			this.redrawTab(editor, index, tabContainer, tabLabelWidget, tabLabel);
@@ -920,7 +1023,7 @@ export class TabsTitleControl extends TitleControl {
 	private redrawTab(editor: IEditorInput, index: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel): void {
 
 		// Label
-		this.redrawLabel(editor, tabContainer, tabLabelWidget, tabLabel);
+		this.redrawLabel(editor, index, tabContainer, tabLabelWidget, tabLabel);
 
 		// Borders / Outline
 		const borderRightColor = (this.getColor(TAB_BORDER) || this.getColor(contrastBorder));
@@ -928,10 +1031,12 @@ export class TabsTitleControl extends TitleControl {
 		tabContainer.style.outlineColor = this.getColor(activeContrastBorder) || '';
 
 		// Settings
+		const isTabSticky = this.group.isSticky(index);
 		const options = this.accessor.partOptions;
 
+		const tabCloseButton = isTabSticky ? 'off' /* treat sticky tabs as tabCloseButton: 'off' */ : options.tabCloseButton;
 		['off', 'left', 'right'].forEach(option => {
-			const domAction = options.tabCloseButton === option ? addClass : removeClass;
+			const domAction = tabCloseButton === option ? addClass : removeClass;
 			domAction(tabContainer, `close-button-${option}`);
 		});
 
@@ -946,25 +1051,57 @@ export class TabsTitleControl extends TitleControl {
 			removeClass(tabContainer, 'has-icon-theme');
 		}
 
+		// Sticky Tabs need a position to remain at their location
+		// when scrolling to stay in view (requirement for position: sticky)
+		if (isTabSticky) {
+			addClass(tabContainer, 'sticky');
+			tabContainer.style.left = `${index * TabsTitleControl.TAB_SIZES.sticky}px`;
+		} else {
+			removeClass(tabContainer, 'sticky');
+			tabContainer.style.left = 'auto';
+		}
+
 		// Active / dirty state
 		this.redrawEditorActiveAndDirty(this.accessor.activeGroup === this.group, editor, tabContainer, tabLabelWidget);
 	}
 
-	private redrawLabel(editor: IEditorInput, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel): void {
-		const name = tabLabel.name;
-		const description = tabLabel.description || '';
+	private redrawLabel(editor: IEditorInput, index: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel): void {
+		const isTabSticky = this.group.isSticky(index);
+
+		// Unless tabs are sticky, show the full label and description
+		// Sticky tabs will only show an icon if icons are enabled
+		// or their first character of the name otherwise
+		let name: string | undefined;
+		let description: string;
+		if (isTabSticky) {
+			const isShowingIcons = this.accessor.partOptions.showIcons && !!this.accessor.partOptions.iconTheme;
+			name = isShowingIcons ? '' : tabLabel.name?.charAt(0).toUpperCase();
+			description = '';
+		} else {
+			name = tabLabel.name;
+			description = tabLabel.description || '';
+		}
+
 		const title = tabLabel.title || '';
 
-		// Container
-		tabContainer.setAttribute('aria-label', `${name}, tab`);
+		if (tabLabel.ariaLabel) {
+			tabContainer.setAttribute('aria-label', tabLabel.ariaLabel);
+			// Set aria-description to empty string so that screen readers would not read the title as well
+			// More details https://github.com/microsoft/vscode/issues/95378
+			tabContainer.setAttribute('aria-description', '');
+		}
 		tabContainer.title = title;
 
 		// Label
-		const resource = toResource(editor, { supportSideBySide: SideBySideEditor.MASTER });
-		tabLabelWidget.setResource({ name, description, resource }, { title, extraClasses: ['tab-label'], italic: !this.group.isPinned(editor) });
+		tabLabelWidget.setResource(
+			{ name, description, resource: toResource(editor, { supportSideBySide: SideBySideEditor.BOTH }) },
+			{ title, extraClasses: ['tab-label'], italic: !this.group.isPinned(editor), forceLabel: isTabSticky }
+		);
+
 		this.setEditorTabColor(editor, tabContainer, this.group.isActive(editor)); // {{SQL CARBON EDIT}} -- Display the editor's tab color
 
 		// Tests helper
+		const resource = toResource(editor, { supportSideBySide: SideBySideEditor.MASTER });
 		if (resource) {
 			tabContainer.setAttribute('data-resource-name', basenameOrAuthority(resource));
 		} else {
@@ -1009,7 +1146,7 @@ export class TabsTitleControl extends TitleControl {
 			}
 
 			// Label
-			tabLabelWidget.element.style.color = this.getColor(isGroupActive ? TAB_ACTIVE_FOREGROUND : TAB_UNFOCUSED_ACTIVE_FOREGROUND) || '';
+			tabContainer.style.color = this.getColor(isGroupActive ? TAB_ACTIVE_FOREGROUND : TAB_UNFOCUSED_ACTIVE_FOREGROUND) || '';
 		}
 
 		// Tab is inactive
@@ -1018,11 +1155,11 @@ export class TabsTitleControl extends TitleControl {
 			// Container
 			removeClass(tabContainer, 'active');
 			tabContainer.setAttribute('aria-selected', 'false');
-			tabContainer.style.backgroundColor = this.getColor(TAB_INACTIVE_BACKGROUND) || '';
+			tabContainer.style.backgroundColor = this.getColor(isGroupActive ? TAB_INACTIVE_BACKGROUND : TAB_UNFOCUSED_INACTIVE_BACKGROUND) || '';
 			tabContainer.style.boxShadow = '';
 
 			// Label
-			tabLabelWidget.element.style.color = this.getColor(isGroupActive ? TAB_INACTIVE_FOREGROUND : TAB_UNFOCUSED_INACTIVE_FOREGROUND) || '';
+			tabContainer.style.color = this.getColor(isGroupActive ? TAB_INACTIVE_FOREGROUND : TAB_UNFOCUSED_INACTIVE_FOREGROUND) || '';
 		}
 
 		// {{SQL CARBON EDIT}} - Override the editor's tab color if query tab coloring is set
@@ -1072,11 +1209,15 @@ export class TabsTitleControl extends TitleControl {
 		return hasModifiedBorderColor;
 	}
 
+	getPreferredHeight(): number {
+		return EDITOR_TITLE_HEIGHT + (this.breadcrumbsControl && !this.breadcrumbsControl.isHidden() ? BreadcrumbsControl.HEIGHT : 0);
+	}
+
 	layout(dimension: Dimension | undefined): void {
 		this.dimension = dimension;
 
-		const activeTab = this.group.activeEditor ? this.getTab(this.group.activeEditor) : undefined;
-		if (!activeTab || !this.dimension) {
+		const activeTabAndIndex = this.group.activeEditor ? this.getTabAndIndex(this.group.activeEditor) : undefined;
+		if (!activeTabAndIndex || !this.dimension) {
 			return;
 		}
 
@@ -1094,20 +1235,66 @@ export class TabsTitleControl extends TitleControl {
 	}
 
 	private doLayout(dimension: Dimension): void {
-		const activeTab = this.group.activeEditor ? this.getTab(this.group.activeEditor) : undefined;
-		if (!activeTab) {
-			return;
+		const activeTabAndIndex = this.group.activeEditor ? this.getTabAndIndex(this.group.activeEditor) : undefined;
+		if (!activeTabAndIndex) {
+			return; // nothing to do if not editor opened
 		}
 
-		const [tabsContainer, tabsScrollbar] = assertAllDefined(this.tabsContainer, this.tabsScrollbar);
+		// Breadcrumbs
+		this.doLayoutBreadcrumbs(dimension);
 
+		// Tabs
+		const [activeTab, activeIndex] = activeTabAndIndex;
+		this.doLayoutTabs(activeTab, activeIndex);
+	}
+
+	private doLayoutBreadcrumbs(dimension: Dimension): void {
 		if (this.breadcrumbsControl && !this.breadcrumbsControl.isHidden()) {
+			const tabsScrollbar = assertIsDefined(this.tabsScrollbar);
+
 			this.breadcrumbsControl.layout({ width: dimension.width, height: BreadcrumbsControl.HEIGHT });
 			tabsScrollbar.getDomNode().style.height = `${dimension.height - BreadcrumbsControl.HEIGHT}px`;
 		}
+	}
 
-		const visibleContainerWidth = tabsContainer.offsetWidth;
-		const totalContainerWidth = tabsContainer.scrollWidth;
+	private doLayoutTabs(activeTab: HTMLElement, activeIndex: number): void {
+		const [tabsContainer, tabsScrollbar] = assertAllDefined(this.tabsContainer, this.tabsScrollbar);
+
+		//
+		// Synopsis
+		// - allTabsWidth:   			sum of all tab widths
+		// - stickyTabsWidth:			sum of all sticky tab widths
+		// - visibleContainerWidth: 	size of tab container
+		// - availableContainerWidth: 	size of tab container minus size of sticky tabs
+		//
+		// [------------------------------ All tabs width ---------------------------------------]
+		// [------------------- Visible container width -------------------]
+		//                         [------ Available container width ------]
+		// [ Sticky A ][ Sticky B ][ Tab C ][ Tab D ][ Tab E ][ Tab F ][ Tab G ][ Tab H ][ Tab I ]
+		//                 Active Tab Width [-------]
+		// [------- Active Tab Pos X -------]
+		// [-- Sticky Tabs Width --]
+		//
+
+		const visibleTabsContainerWidth = tabsContainer.offsetWidth;
+		const allTabsWidth = tabsContainer.scrollWidth;
+
+		let stickyTabsWidth = this.group.stickyCount * TabsTitleControl.TAB_SIZES.sticky;
+		let activeTabSticky = this.group.isSticky(activeIndex);
+		let availableTabsContainerWidth = visibleTabsContainerWidth - stickyTabsWidth;
+
+		// Special case: we have sticky tabs but the available space for showing tabs
+		// is little enough that we need to disable sticky tabs sticky positioning
+		// so that tabs can be scrolled at naturally.
+		if (this.group.stickyCount > 0 && availableTabsContainerWidth < TabsTitleControl.TAB_SIZES.fit) {
+			addClass(tabsContainer, 'disable-sticky-tabs');
+
+			availableTabsContainerWidth = visibleTabsContainerWidth;
+			stickyTabsWidth = 0;
+			activeTabSticky = false;
+		} else {
+			removeClass(tabsContainer, 'disable-sticky-tabs');
+		}
 
 		let activeTabPosX: number | undefined;
 		let activeTabWidth: number | undefined;
@@ -1119,42 +1306,78 @@ export class TabsTitleControl extends TitleControl {
 
 		// Update scrollbar
 		tabsScrollbar.setScrollDimensions({
-			width: visibleContainerWidth,
-			scrollWidth: totalContainerWidth
+			width: visibleTabsContainerWidth,
+			scrollWidth: allTabsWidth
 		});
 
 		// Return now if we are blocked to reveal the active tab and clear flag
-		if (this.blockRevealActiveTab || typeof activeTabPosX !== 'number' || typeof activeTabWidth !== 'number') {
+		// We also return if the active tab is sticky because this means it is
+		// always visible anyway.
+		if (this.blockRevealActiveTab || typeof activeTabPosX !== 'number' || typeof activeTabWidth !== 'number' || activeTabSticky) {
 			this.blockRevealActiveTab = false;
 			return;
 		}
 
 		// Reveal the active one
-		const containerScrollPosX = tabsScrollbar.getScrollPosition().scrollLeft;
-		const activeTabFits = activeTabWidth <= visibleContainerWidth;
+		const tabsContainerScrollPosX = tabsScrollbar.getScrollPosition().scrollLeft;
+		const activeTabFits = activeTabWidth <= availableTabsContainerWidth;
+		const adjustedActiveTabPosX = activeTabPosX - stickyTabsWidth;
 
+		//
+		// Synopsis
+		// - adjustedActiveTabPosX: the adjusted tabPosX takes the width of sticky tabs into account
+		//   conceptually the scrolling only begins after sticky tabs so in order to reveal a tab fully
+		//   the actual position needs to be adjusted for sticky tabs.
+		//
 		// Tab is overflowing to the right: Scroll minimally until the element is fully visible to the right
 		// Note: only try to do this if we actually have enough width to give to show the tab fully!
-		if (activeTabFits && containerScrollPosX + visibleContainerWidth < activeTabPosX + activeTabWidth) {
+		//
+		// Example: Tab G should be made active and needs to be fully revealed as such.
+		//
+		// [-------------------------------- All tabs width -----------------------------------------]
+		// [-------------------- Visible container width --------------------]
+		//                           [----- Available container width -------]
+		//     [ Sticky A ][ Sticky B ][ Tab C ][ Tab D ][ Tab E ][ Tab F ][ Tab G ][ Tab H ][ Tab I ]
+		//                     Active Tab Width [-------]
+		//     [------- Active Tab Pos X -------]
+		//                             [-------- Adjusted Tab Pos X -------]
+		//     [-- Sticky Tabs Width --]
+		//
+		//
+		if (activeTabFits && tabsContainerScrollPosX + availableTabsContainerWidth < adjustedActiveTabPosX + activeTabWidth) {
 			tabsScrollbar.setScrollPosition({
-				scrollLeft: containerScrollPosX + ((activeTabPosX + activeTabWidth) /* right corner of tab */ - (containerScrollPosX + visibleContainerWidth) /* right corner of view port */)
+				scrollLeft: tabsContainerScrollPosX + ((adjustedActiveTabPosX + activeTabWidth) /* right corner of tab */ - (tabsContainerScrollPosX + availableTabsContainerWidth) /* right corner of view port */)
 			});
 		}
 
-		// Tab is overlflowng to the left or does not fit: Scroll it into view to the left
-		else if (containerScrollPosX > activeTabPosX || !activeTabFits) {
+		//
+		// Tab is overlflowing to the left or does not fit: Scroll it into view to the left
+		//
+		// Example: Tab C should be made active and needs to be fully revealed as such.
+		//
+		// [----------------------------- All tabs width ----------------------------------------]
+		//     [------------------ Visible container width ------------------]
+		//                           [----- Available container width -------]
+		// [ Sticky A ][ Sticky B ][ Tab C ][ Tab D ][ Tab E ][ Tab F ][ Tab G ][ Tab H ][ Tab I ]
+		//                 Active Tab Width [-------]
+		// [------- Active Tab Pos X -------]
+		//      Adjusted Tab Pos X []
+		// [-- Sticky Tabs Width --]
+		//
+		//
+		else if (tabsContainerScrollPosX > adjustedActiveTabPosX || !activeTabFits) {
 			tabsScrollbar.setScrollPosition({
-				scrollLeft: activeTabPosX
+				scrollLeft: adjustedActiveTabPosX
 			});
 		}
 	}
 
-	private getTab(editor: IEditorInput): HTMLElement | undefined {
+	private getTabAndIndex(editor: IEditorInput): [HTMLElement, number /* index */] | undefined {
 		const editorIndex = this.group.getIndexOfEditor(editor);
 		if (editorIndex >= 0) {
 			const tabsContainer = assertIsDefined(this.tabsContainer);
 
-			return tabsContainer.children[editorIndex] as HTMLElement;
+			return [tabsContainer.children[editorIndex] as HTMLElement, editorIndex];
 		}
 
 		return undefined;
@@ -1250,7 +1473,7 @@ export class TabsTitleControl extends TitleControl {
 		let sqlEditor = editor as any;
 		let tabColorMode = WorkbenchUtils.getSqlConfigValue<string>(this.configurationService, 'tabColorMode');
 		if (tabColorMode === QueryConstants.tabColorModeOff || (tabColorMode !== QueryConstants.tabColorModeBorder && tabColorMode !== QueryConstants.tabColorModeFill)
-			|| this.themeService.getTheme().type === HIGH_CONTRAST || !sqlEditor.tabColor) {
+			|| this.themeService.getColorTheme().type === HIGH_CONTRAST || !sqlEditor.tabColor) {
 			tabContainer.style.borderTopColor = '';
 			tabContainer.style.borderTopWidth = '';
 			tabContainer.style.borderTopStyle = '';
@@ -1274,16 +1497,18 @@ export class TabsTitleControl extends TitleControl {
 	}
 }
 
-registerThemingParticipant((theme: ITheme, collector: ICssStyleCollector) => {
+registerThemingParticipant((theme: IColorTheme, collector: ICssStyleCollector) => {
+
 	// Add border between tabs and breadcrumbs in high contrast mode.
 	if (theme.type === HIGH_CONTRAST) {
 		const borderColor = (theme.getColor(TAB_BORDER) || theme.getColor(contrastBorder));
 		collector.addRule(`
-		.monaco-workbench div.tabs-and-actions-container {
-			border-bottom: 1px solid ${borderColor};
-		}
+			.monaco-workbench .part.editor > .content .editor-group-container > .title.tabs > .tabs-and-actions-container {
+				border-bottom: 1px solid ${borderColor};
+			}
 		`);
 	}
+
 	// Styling with Outline color (e.g. high contrast theme)
 	const activeContrastBorderColor = theme.getColor(activeContrastBorder);
 	if (activeContrastBorderColor) {
@@ -1337,6 +1562,25 @@ registerThemingParticipant((theme: ITheme, collector: ICssStyleCollector) => {
 		`);
 	}
 
+	// Hover Foreground
+	const tabHoverForeground = theme.getColor(TAB_HOVER_FOREGROUND);
+	if (tabHoverForeground) {
+		collector.addRule(`
+			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab:hover  {
+				color: ${tabHoverForeground} !important;
+			}
+		`);
+	}
+
+	const tabUnfocusedHoverForeground = theme.getColor(TAB_UNFOCUSED_HOVER_FOREGROUND);
+	if (tabUnfocusedHoverForeground) {
+		collector.addRule(`
+			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover  {
+				color: ${tabUnfocusedHoverForeground} !important;
+			}
+		`);
+	}
+
 	// Hover Border
 	const tabHoverBorder = theme.getColor(TAB_HOVER_BORDER);
 	if (tabHoverBorder) {
@@ -1375,13 +1619,13 @@ registerThemingParticipant((theme: ITheme, collector: ICssStyleCollector) => {
 
 		// Adjust gradient for focused and unfocused hover background
 		const makeTabHoverBackgroundRule = (color: Color, colorDrag: Color, hasFocus = false) => `
-				.monaco-workbench .part.editor > .content:not(.dragged-over) .editor-group-container${hasFocus ? '.active' : ''} > .title .tabs-container > .tab.sizing-shrink:not(.dragged):hover > .tab-label::after {
-					background: linear-gradient(to left, ${color}, transparent) !important;
-				}
+			.monaco-workbench .part.editor > .content:not(.dragged-over) .editor-group-container${hasFocus ? '.active' : ''} > .title .tabs-container > .tab.sizing-shrink:not(.dragged):not(.sticky):hover > .tab-label::after {
+				background: linear-gradient(to left, ${color}, transparent) !important;
+			}
 
-				.monaco-workbench .part.editor > .content.dragged-over .editor-group-container${hasFocus ? '.active' : ''} > .title .tabs-container > .tab.sizing-shrink:not(.dragged):hover > .tab-label::after {
-					background: linear-gradient(to left, ${colorDrag}, transparent) !important;
-				}
+			.monaco-workbench .part.editor > .content.dragged-over .editor-group-container${hasFocus ? '.active' : ''} > .title .tabs-container > .tab.sizing-shrink:not(.dragged):not(.sticky):hover > .tab-label::after {
+				background: linear-gradient(to left, ${colorDrag}, transparent) !important;
+			}
 		`;
 
 		// Adjust gradient for (focused) hover background
@@ -1402,30 +1646,29 @@ registerThemingParticipant((theme: ITheme, collector: ICssStyleCollector) => {
 		if (editorDragAndDropBackground && adjustedTabDragBackground) {
 			const adjustedColorDrag = editorDragAndDropBackground.flatten(adjustedTabDragBackground);
 			collector.addRule(`
-			.monaco-workbench .part.editor > .content.dragged-over .editor-group-container.active > .title .tabs-container > .tab.sizing-shrink.dragged-over:not(.active):not(.dragged) > .tab-label::after,
-			.monaco-workbench .part.editor > .content.dragged-over .editor-group-container:not(.active) > .title .tabs-container > .tab.sizing-shrink.dragged-over:not(.dragged) > .tab-label::after {
-				background: linear-gradient(to left, ${adjustedColorDrag}, transparent) !important;
-			}
+				.monaco-workbench .part.editor > .content.dragged-over .editor-group-container.active > .title .tabs-container > .tab.sizing-shrink.dragged-over:not(.active):not(.dragged):not(.sticky) > .tab-label::after,
+				.monaco-workbench .part.editor > .content.dragged-over .editor-group-container:not(.active) > .title .tabs-container > .tab.sizing-shrink.dragged-over:not(.dragged):not(.sticky) > .tab-label::after {
+					background: linear-gradient(to left, ${adjustedColorDrag}, transparent) !important;
+				}
 		`);
 		}
 
-		// Adjust gradient for active tab background (focused and unfocused editor groups)
-		const makeTabActiveBackgroundRule = (color: Color, colorDrag: Color, hasFocus = false) => `
-				.monaco-workbench .part.editor > .content:not(.dragged-over) .editor-group-container${hasFocus ? '.active' : ':not(.active)'} > .title .tabs-container > .tab.sizing-shrink.active:not(.dragged) > .tab-label::after {
+		const makeTabBackgroundRule = (color: Color, colorDrag: Color, focused: boolean, active: boolean) => `
+				.monaco-workbench .part.editor > .content:not(.dragged-over) .editor-group-container${focused ? '.active' : ':not(.active)'} > .title .tabs-container > .tab.sizing-shrink${active ? '.active' : ''}:not(.dragged):not(.sticky) > .tab-label::after {
 					background: linear-gradient(to left, ${color}, transparent);
 				}
 
-				.monaco-workbench .part.editor > .content.dragged-over .editor-group-container${hasFocus ? '.active' : ':not(.active)'} > .title .tabs-container > .tab.sizing-shrink.active:not(.dragged) > .tab-label::after {
+				.monaco-workbench .part.editor > .content.dragged-over .editor-group-container${focused ? '.active' : ':not(.active)'} > .title .tabs-container > .tab.sizing-shrink${active ? '.active' : ''}:not(.dragged):not(.sticky) > .tab-label::after {
 					background: linear-gradient(to left, ${colorDrag}, transparent);
 				}
 		`;
 
-		// Adjust gradient for unfocused active tab background
+		// Adjust gradient for focused active tab background
 		const tabActiveBackground = theme.getColor(TAB_ACTIVE_BACKGROUND);
 		if (tabActiveBackground && adjustedTabBackground && adjustedTabDragBackground) {
 			const adjustedColor = tabActiveBackground.flatten(adjustedTabBackground);
 			const adjustedColorDrag = tabActiveBackground.flatten(adjustedTabDragBackground);
-			collector.addRule(makeTabActiveBackgroundRule(adjustedColor, adjustedColorDrag, true));
+			collector.addRule(makeTabBackgroundRule(adjustedColor, adjustedColorDrag, true, true));
 		}
 
 		// Adjust gradient for unfocused active tab background
@@ -1433,23 +1676,23 @@ registerThemingParticipant((theme: ITheme, collector: ICssStyleCollector) => {
 		if (tabUnfocusedActiveBackground && adjustedTabBackground && adjustedTabDragBackground) {
 			const adjustedColor = tabUnfocusedActiveBackground.flatten(adjustedTabBackground);
 			const adjustedColorDrag = tabUnfocusedActiveBackground.flatten(adjustedTabDragBackground);
-			collector.addRule(makeTabActiveBackgroundRule(adjustedColor, adjustedColorDrag));
+			collector.addRule(makeTabBackgroundRule(adjustedColor, adjustedColorDrag, false, true));
 		}
 
-		// Adjust gradient for inactive tab background
+		// Adjust gradient for focused inactive tab background
 		const tabInactiveBackground = theme.getColor(TAB_INACTIVE_BACKGROUND);
 		if (tabInactiveBackground && adjustedTabBackground && adjustedTabDragBackground) {
 			const adjustedColor = tabInactiveBackground.flatten(adjustedTabBackground);
 			const adjustedColorDrag = tabInactiveBackground.flatten(adjustedTabDragBackground);
-			collector.addRule(`
-			.monaco-workbench .part.editor > .content:not(.dragged-over) .editor-group-container > .title .tabs-container > .tab.sizing-shrink:not(.dragged) > .tab-label::after {
-				background: linear-gradient(to left, ${adjustedColor}, transparent);
-			}
+			collector.addRule(makeTabBackgroundRule(adjustedColor, adjustedColorDrag, true, false));
+		}
 
-			.monaco-workbench .part.editor > .content.dragged-over .editor-group-container > .title .tabs-container > .tab.sizing-shrink:not(.dragged) > .tab-label::after {
-				background: linear-gradient(to left, ${adjustedColorDrag}, transparent);
-			}
-		`);
+		// Adjust gradient for unfocused inactive tab background
+		const tabUnfocusedInactiveBackground = theme.getColor(TAB_UNFOCUSED_INACTIVE_BACKGROUND);
+		if (tabUnfocusedInactiveBackground && adjustedTabBackground && adjustedTabDragBackground) {
+			const adjustedColor = tabUnfocusedInactiveBackground.flatten(adjustedTabBackground);
+			const adjustedColorDrag = tabUnfocusedInactiveBackground.flatten(adjustedTabDragBackground);
+			collector.addRule(makeTabBackgroundRule(adjustedColor, adjustedColorDrag, false, false));
 		}
 	}
 });

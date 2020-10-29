@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 
-import { window, QuickPickItem } from 'vscode';
+import { window, QuickPickItem, env, Uri } from 'vscode';
 import * as azdata from 'azdata';
 import { TokenCredentials } from '@azure/ms-rest-js';
 import * as nls from 'vscode-nls';
@@ -16,88 +16,64 @@ import { TreeNode } from './treeNode';
 import { AzureResourceCredentialError } from './errors';
 import { AzureResourceTreeProvider } from './tree/treeProvider';
 import { AzureResourceAccountTreeNode } from './tree/accountTreeNode';
-import { IAzureResourceSubscriptionService, IAzureResourceSubscriptionFilterService } from '../azureResource/interfaces';
+import { IAzureResourceSubscriptionService, IAzureResourceSubscriptionFilterService, IAzureTerminalService } from '../azureResource/interfaces';
 import { AzureResourceServiceNames } from './constants';
-import { AzureResourceGroupService } from './providers/resourceGroup/resourceGroupService';
-import { GetSubscriptionsResult, GetResourceGroupsResult } from '../azurecore';
-import { isArray } from 'util';
+import { AzureAccount, Tenant } from '../account-provider/interfaces';
 
 export function registerAzureResourceCommands(appContext: AppContext, tree: AzureResourceTreeProvider): void {
-
-	// Resource Management commands
-	appContext.apiWrapper.registerCommand('azure.accounts.getSubscriptions', async (account?: azdata.Account, ignoreErrors: boolean = false): Promise<GetSubscriptionsResult> => {
-		const result: GetSubscriptionsResult = { subscriptions: [], errors: [] };
-		if (!account?.properties?.tenants || !isArray(account.properties.tenants)) {
-			const error = new Error(localize('azure.accounts.getSubscriptions.invalidParamsError', "Invalid account"));
-			if (!ignoreErrors) {
-				throw error;
+	appContext.apiWrapper.registerCommand('azure.resource.startterminal', async (node?: TreeNode) => {
+		try {
+			const enablePreviewFeatures = appContext.apiWrapper.getConfiguration('workbench').get('enablePreviewFeatures');
+			if (!enablePreviewFeatures) {
+				const msg = localize('azure.cloudTerminalPreview', "You must enable preview features in order to use Azure Cloud Shell.");
+				appContext.apiWrapper.showInformationMessage(msg);
+				return;
 			}
-			result.errors.push(error);
-			return result;
-		}
-		const subscriptionService = appContext.getService<IAzureResourceSubscriptionService>(AzureResourceServiceNames.subscriptionService);
-		const tokens = await appContext.apiWrapper.getSecurityToken(account, azdata.AzureResource.ResourceManagement);
-		await Promise.all(account.properties.tenants.map(async (tenant: { id: string | number; }) => {
-			try {
-				const token = tokens[tenant.id].token;
-				const tokenType = tokens[tenant.id].tokenType;
+			if (!node || !(node instanceof AzureResourceAccountTreeNode)) {
+				return;
+			}
 
-				result.subscriptions.push(...await subscriptionService.getSubscriptions(account, new TokenCredentials(token, tokenType)));
-			} catch (err) {
-				const error = new Error(localize('azure.accounts.getSubscriptions.queryError', "Error fetching subscriptions for account {0} tenant {1} : {2}",
-					account.displayInfo.displayName,
-					tenant.id,
-					err instanceof Error ? err.message : err));
-				console.warn(error);
-				if (!ignoreErrors) {
-					throw error;
+			const accountNode = node as AzureResourceAccountTreeNode;
+			const azureAccount = accountNode.account as AzureAccount;
+
+			const tokens = await appContext.apiWrapper.getSecurityToken(azureAccount, azdata.AzureResource.MicrosoftResourceManagement);
+
+			const terminalService = appContext.getService<IAzureTerminalService>(AzureResourceServiceNames.terminalService);
+
+			const listOfTenants = azureAccount.properties.tenants.map(t => t.displayName);
+
+			if (listOfTenants.length === 0) {
+				window.showErrorMessage(localize('azure.noTenants', "A tenant is required for this feature. Your Azure subscription seems to have no tenants."));
+				return;
+			}
+
+			let tenant: Tenant;
+			window.setStatusBarMessage(localize('azure.startingCloudShell', "Starting cloud shell…"), 5000);
+
+			if (listOfTenants.length === 1) {
+				// Don't show quickpick for a single option
+				tenant = azureAccount.properties.tenants[0];
+			} else {
+				const pickedTenant = await window.showQuickPick(listOfTenants, { canPickMany: false });
+
+				if (!pickedTenant) {
+					window.showErrorMessage(localize('azure.mustPickTenant', "You must select a tenant for this feature to work."));
+					return;
 				}
-				result.errors.push(error);
-			}
-			return Promise.resolve();
-		}));
-		return result;
-	});
 
-	appContext.apiWrapper.registerCommand('azure.accounts.getResourceGroups', async (account?: azdata.Account, subscription?: azureResource.AzureResourceSubscription, ignoreErrors: boolean = false): Promise<GetResourceGroupsResult> => {
-		const result: GetResourceGroupsResult = { resourceGroups: [], errors: [] };
-		if (!account?.properties?.tenants || !isArray(account.properties.tenants) || !subscription) {
-			const error = new Error(localize('azure.accounts.getResourceGroups.invalidParamsError', "Invalid account or subscription"));
-			if (!ignoreErrors) {
-				throw error;
+				// The tenant the user picked
+				tenant = azureAccount.properties.tenants[listOfTenants.indexOf(pickedTenant)];
 			}
-			result.errors.push(error);
-			return result;
+
+			await terminalService.getOrCreateCloudConsole(azureAccount, tenant, tokens);
+		} catch (ex) {
+			console.error(ex);
+			window.showErrorMessage(ex);
 		}
-		const service = new AzureResourceGroupService();
-		await Promise.all(account.properties.tenants.map(async (tenant: { id: string | number; }) => {
-			try {
-				const tokens = await appContext.apiWrapper.getSecurityToken(account, azdata.AzureResource.ResourceManagement);
-				const token = tokens[tenant.id].token;
-				const tokenType = tokens[tenant.id].tokenType;
-
-				result.resourceGroups.push(...await service.getResources(subscription, new TokenCredentials(token, tokenType)));
-			} catch (err) {
-				const error = new Error(localize('azure.accounts.getResourceGroups.queryError', "Error fetching resource groups for account {0} ({1}) subscription {2} ({3}) tenant {4} : {5}",
-					account.displayInfo.displayName,
-					account.displayInfo.userId,
-					subscription.id,
-					subscription.name,
-					tenant.id,
-					err instanceof Error ? err.message : err));
-				console.warn(error);
-				if (!ignoreErrors) {
-					throw error;
-				}
-				result.errors.push(error);
-			}
-			return Promise.resolve();
-		}));
-
-		return result;
 	});
 
 	// Resource Tree commands
+
 	appContext.apiWrapper.registerCommand('azure.resource.selectsubscriptions', async (node?: TreeNode) => {
 		if (!(node instanceof AzureResourceAccountTreeNode)) {
 			return;
@@ -120,6 +96,7 @@ export function registerAzureResourceCommands(appContext: AppContext, tree: Azur
 					subscriptions.push(...await subscriptionService.getSubscriptions(accountNode.account, new TokenCredentials(token, tokenType)));
 				}
 			} catch (error) {
+				this.account.isStale = true;
 				throw new AzureResourceCredentialError(localize('azure.resource.selectsubscriptions.credentialError', "Failed to get credential for account {0}. Please refresh the account.", this.account.key.accountId), error);
 			}
 		}
@@ -183,5 +160,19 @@ export function registerAzureResourceCommands(appContext: AppContext, tree: Azur
 		if (conn) {
 			appContext.apiWrapper.executeCommand('workbench.view.connections');
 		}
+	});
+
+	appContext.apiWrapper.registerCommand('azure.resource.openInAzurePortal', async (connectionProfile: azdata.IConnectionProfile) => {
+
+		if (
+			!connectionProfile.azureResourceId ||
+			!connectionProfile.azurePortalEndpoint ||
+			!connectionProfile.azureTenantId
+		) {
+			return;
+		}
+
+		const urlToOpen = `${connectionProfile.azurePortalEndpoint}//${connectionProfile.azureTenantId}/#resource/${connectionProfile.azureResourceId}`;
+		env.openExternal(Uri.parse(urlToOpen));
 	});
 }

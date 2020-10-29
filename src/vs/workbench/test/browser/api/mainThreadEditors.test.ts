@@ -11,7 +11,7 @@ import { ModelServiceImpl } from 'vs/editor/common/services/modelServiceImpl';
 import { TestCodeEditorService } from 'vs/editor/test/browser/editorTestServices';
 import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
 import { ExtHostDocumentsAndEditorsShape, ExtHostContext, ExtHostDocumentsShape, IWorkspaceTextEditDto } from 'vs/workbench/api/common/extHost.protocol';
-import { mock } from 'vs/workbench/test/browser/api/mock';
+import { mock } from 'vs/base/test/common/mock';
 import { Event } from 'vs/base/common/event';
 import { MainThreadTextEditors } from 'vs/workbench/api/browser/mainThreadEditors';
 import { URI } from 'vs/base/common/uri';
@@ -19,7 +19,7 @@ import { Range } from 'vs/editor/common/core/range';
 import { Position } from 'vs/editor/common/core/position';
 import { IModelService } from 'vs/editor/common/services/modelService';
 import { EditOperation } from 'vs/editor/common/core/editOperation';
-import { TestFileService, TestEditorService, TestEditorGroupsService, TestEnvironmentService, TestContextService, TestTextResourcePropertiesService } from 'vs/workbench/test/browser/workbenchTestServices';
+import { TestFileService, TestEditorService, TestEditorGroupsService, TestEnvironmentService } from 'vs/workbench/test/browser/workbenchTestServices';
 import { BulkEditService } from 'vs/workbench/services/bulkEdit/browser/bulkEditService';
 import { NullLogService, ILogService } from 'vs/platform/log/common/log';
 import { ITextModelService, IResolvedTextEditorModel } from 'vs/editor/common/services/resolverService';
@@ -47,6 +47,7 @@ import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { IUndoRedoService } from 'vs/platform/undoRedo/common/undoRedo';
 import { TestNotificationService } from 'vs/platform/notification/test/common/testNotificationService';
 import { INotificationService } from 'vs/platform/notification/common/notification';
+import { TestTextResourcePropertiesService, TestContextService } from 'vs/workbench/test/common/workbenchTestServices';
 
 suite('MainThreadEditors', () => {
 
@@ -103,6 +104,7 @@ suite('MainThreadEditors', () => {
 			};
 		});
 		services.set(IWorkingCopyFileService, new class extends mock<IWorkingCopyFileService>() {
+			onDidRunWorkingCopyFileOperation = Event.None;
 			move(source: URI, target: URI) {
 				movedResources.set(source, target);
 				return Promise.resolve(Object.create(null));

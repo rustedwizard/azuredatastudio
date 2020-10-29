@@ -395,6 +395,8 @@ export function toFileOperationResult(error: Error): FileOperationResult {
 			return FileOperationResult.FILE_NOT_FOUND;
 		case FileSystemProviderErrorCode.FileIsADirectory:
 			return FileOperationResult.FILE_IS_DIRECTORY;
+		case FileSystemProviderErrorCode.FileNotADirectory:
+			return FileOperationResult.FILE_NOT_DIRECTORY;
 		case FileSystemProviderErrorCode.NoPermissions:
 			return FileOperationResult.FILE_PERMISSION_DENIED;
 		case FileSystemProviderErrorCode.FileExists:
@@ -763,6 +765,7 @@ export const enum FileOperationResult {
 	FILE_TOO_LARGE,
 	FILE_INVALID_PATH,
 	FILE_EXCEEDS_MEMORY_LIMIT,
+	FILE_NOT_DIRECTORY,
 	FILE_OTHER_ERROR
 }
 
@@ -821,7 +824,6 @@ export function etag(stat: { mtime: number | undefined, size: number | undefined
 	return stat.mtime.toString(29) + stat.size.toString(31);
 }
 
-
 export function whenProviderRegistered(file: URI, fileService: IFileService): Promise<void> {
 	if (fileService.canHandleResource(URI.from({ scheme: file.scheme }))) {
 		return Promise.resolve();
@@ -835,3 +837,9 @@ export function whenProviderRegistered(file: URI, fileService: IFileService): Pr
 		});
 	});
 }
+
+/**
+ * Desktop only: limits for memory sizes
+ */
+export const MIN_MAX_MEMORY_SIZE_MB = 2048;
+export const FALLBACK_MAX_MEMORY_SIZE_MB = 4096;

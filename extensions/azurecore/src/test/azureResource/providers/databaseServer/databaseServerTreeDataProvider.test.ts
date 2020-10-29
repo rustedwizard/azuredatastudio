@@ -19,9 +19,11 @@ import { IAzureResourceService } from '../../../../azureResource/interfaces';
 let mockDatabaseServerService: TypeMoq.IMock<IAzureResourceService<azureResource.AzureResourceDatabaseServer>>;
 let mockApiWrapper: TypeMoq.IMock<ApiWrapper>;
 let mockExtensionContext: TypeMoq.IMock<vscode.ExtensionContext>;
+import settings from '../../../../account-provider/providerSettings';
+import { AzureAccount } from '../../../../account-provider/interfaces';
 
 // Mock test data
-const mockAccount: azdata.Account = {
+const mockAccount: AzureAccount = {
 	key: {
 		accountId: 'mock_account',
 		providerId: 'mock_provider'
@@ -32,7 +34,11 @@ const mockAccount: azdata.Account = {
 		contextualDisplayName: 'test',
 		userId: 'test@email.com'
 	},
-	properties: undefined,
+	properties: {
+		providerSettings: settings[0].metadata,
+		isMsAccount: true,
+		tenants: []
+	},
 	isStale: false
 };
 
@@ -104,7 +110,7 @@ describe('AzureResourceDatabaseServerTreeDataProvider.getChildren', function ():
 		mockExtensionContext = TypeMoq.Mock.ofType<vscode.ExtensionContext>();
 
 		mockApiWrapper.setup((o) => o.getSecurityToken(mockAccount, azdata.AzureResource.ResourceManagement)).returns(() => Promise.resolve(mockTokens));
-		mockDatabaseServerService.setup((o) => o.getResources(mockSubscription, TypeMoq.It.isAny())).returns(() => Promise.resolve(mockDatabaseServers));
+		mockDatabaseServerService.setup((o) => o.getResources(mockSubscription, TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve(mockDatabaseServers));
 		mockExtensionContext.setup((o) => o.asAbsolutePath(TypeMoq.It.isAnyString())).returns(() => TypeMoq.It.isAnyString());
 	});
 

@@ -79,10 +79,22 @@ echo *** starting resource deployment tests ***
 echo ******************************************
 "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_NO_SANDBOX --extensionDevelopmentPath=$ROOT/extensions/resource-deployment --extensionTestsPath=$ROOT/extensions/resource-deployment/out/test --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR --disable-telemetry --disable-crash-reporter --disable-updates --nogpu
 
-echo ******************************************
-echo *** starting machine-learning-services tests ***
-echo ******************************************
-"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_NO_SANDBOX --extensionDevelopmentPath=$ROOT/extensions/machine-learning-services --extensionTestsPath=$ROOT/extensions/machine-learning-services/out/test --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR --disable-telemetry --disable-crash-reporter --disable-updates --nogpu
+echo ************************************************
+echo *** starting machine-learning tests ***
+echo ************************************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_NO_SANDBOX --extensionDevelopmentPath=$ROOT/extensions/machine-learning --extensionTestsPath=$ROOT/extensions/machine-learning/out/test --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR --disable-telemetry --disable-crash-reporter --disable-updates --nogpu
+
+# echo ******************************************
+# echo *** starting mssql tests ***
+# echo ******************************************
+# "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_NO_SANDBOX --extensionDevelopmentPath=$ROOT/extensions/mssql --extensionTestsPath=$ROOT/extensions/mssql/out/test --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR --disable-telemetry --disable-crash-reporter --disable-updates --nogpu
+
+if [[ "$RUN_DBPROJECT_TESTS" == "true" ]]; then
+	echo ********************************************
+	echo *** starting sql-database-projects tests ***
+	echo ********************************************
+	"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_NO_SANDBOX --extensionDevelopmentPath=$ROOT/extensions/sql-database-projects --extensionTestsPath=$ROOT/extensions/sql-database-projects/out/test --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR --disable-telemetry --disable-crash-reporter --disable-updates --nogpu
+fi
 
 rm -r $VSCODEUSERDATADIR
 rm -r $VSCODEEXTDIR

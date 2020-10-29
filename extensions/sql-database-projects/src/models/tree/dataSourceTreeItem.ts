@@ -34,7 +34,9 @@ export class DataSourcesTreeItem extends BaseProjectTreeItem {
 	}
 
 	public get treeItem(): vscode.TreeItem {
-		return new vscode.TreeItem(this.uri, vscode.TreeItemCollapsibleState.Collapsed);
+		const dataSource = new vscode.TreeItem(this.uri, vscode.TreeItemCollapsibleState.Collapsed);
+		dataSource.contextValue = constants.DatabaseProjectItemType.dataSourceRoot;
+		return dataSource;
 	}
 }
 
@@ -53,7 +55,7 @@ export class SqlConnectionDataSourceTreeItem extends DataSourceTreeItem {
 
 	public get treeItem(): vscode.TreeItem {
 		let item = new vscode.TreeItem(this.uri, vscode.TreeItemCollapsibleState.Collapsed);
-		item.label = `${this.dataSource.name} (${this.dataSource.friendlyName})`;
+		item.label = `${this.dataSource.name} (${this.dataSource.typeFriendlyName})`;
 
 		return item;
 	}
